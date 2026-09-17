@@ -29,14 +29,9 @@ import okhttp3.Response;
 
 /**
  * 骚火影视 SaoHuo
- * - 首页/分类/详情：Jsoup 解析
- * - 播放：完整 hhplayer 流程
- *   1. 抓播放页
- *   2. 提取 iframe src（hhplayer 地址）
- *   3. 抓 hhplayer 页面
- *   4. 提取 __HHJX_BOOTSTRAP__
- *   5. POST /api/parse
- *   6. 拿真 m3u8
+ *
+ * 首页/分类/详情：Jsoup 解析
+ * 播放：完整 hhplayer 流程
  */
 public class SaoHuo extends Spider {
 
@@ -47,10 +42,10 @@ public class SaoHuo extends Spider {
             "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/91.0.4472.114 Safari/537.36";
 
-    // ==================== 共享 OkHttpClient ====================
+    // ==================== 共享 OkHttpClient（不叫 client，避免和基类冲突） ====================
     private static OkHttpClient sharedClient;
 
-    private static synchronized OkHttpClient client() {
+    private static synchronized OkHttpClient okClient() {
         if (sharedClient == null) {
             sharedClient = new OkHttpClient.Builder()
                     .connectTimeout(15, TimeUnit.SECONDS)
@@ -96,7 +91,7 @@ public class SaoHuo extends Spider {
     private String execute(Request request) {
         Response response = null;
         try {
-            response = client().newCall(request).execute();
+            response = okClient().newCall(request).execute();
 
             // 更新 cookie
             List<String> setCookies = response.headers("Set-Cookie");
@@ -622,7 +617,7 @@ public class SaoHuo extends Spider {
             for (Map.Entry<String, String> e : h.entrySet()) {
                 builder.addHeader(e.getKey(), e.getValue());
             }
-            return execute(builder.build());   // 走 execute，更新 cookie
+            return execute(builder.build());
         } catch (Exception e) {
             return "";
         }
