@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+buildSrc/build/
+
+# Android
+*.apk
+*.aab
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 保留 wrapper 和关键 jar
+!gradle/wrapper/gradle-wrapper.jar
+!jar/3rd/apktool_2.11.0.jar
+!jar/custom_spider.jar
+!jar/custom_spider.jar.md5
