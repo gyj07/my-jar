@@ -4,7 +4,6 @@ import android.content.Context;
 import android.text.TextUtils;
 
 import com.github.catvod.crawler.Spider;
-import com.github.catvod.utils.okhttp.OkHttpUtil;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -18,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -29,9 +29,8 @@ import okhttp3.Response;
 
 /**
  * 骚火影视 SaoHuo
- *
- * 首页/分类/详情：Jsoup 解析
- * 播放：完整 hhplayer 流程
+ * - 首页/分类/详情：Jsoup 解析
+ * - 播放：完整 hhplayer 流程
  *   1. 抓播放页
  *   2. 提取 iframe src（hhplayer 地址）
  *   3. 抓 hhplayer 页面
@@ -47,6 +46,20 @@ public class SaoHuo extends Spider {
     private static final String UA =
             "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/91.0.4472.114 Safari/537.36";
+
+    // ==================== 共享 OkHttpClient ====================
+    private static OkHttpClient sharedClient;
+
+    private static synchronized OkHttpClient client() {
+        if (sharedClient == null) {
+            sharedClient = new OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .writeTimeout(15, TimeUnit.SECONDS)
+                    .build();
+        }
+        return sharedClient;
+    }
 
     // ==================== 请求 ====================
 
@@ -83,8 +96,7 @@ public class SaoHuo extends Spider {
     private String execute(Request request) {
         Response response = null;
         try {
-            OkHttpClient client = OkHttpUtil.defaultClient();
-            response = client.newCall(request).execute();
+            response = client().newCall(request).execute();
 
             // 更新 cookie
             List<String> setCookies = response.headers("Set-Cookie");
@@ -476,7 +488,6 @@ public class SaoHuo extends Spider {
         // 2. 提取 iframe src（hhplayer 地址）
         String hhUrl = extractHhUrl(html);
         if (TextUtils.isEmpty(hhUrl)) {
-            // 抠不到 hhplayer，兜底
             return buildResult(0, playPageUrl, playPageUrl);
         }
 
@@ -538,9 +549,6 @@ public class SaoHuo extends Spider {
 
     // ==================== 播放工具 ====================
 
-    /**
-     * 从 HTML 抠 hhplayer URL
-     */
     private String extractHhUrl(String html) {
         if (TextUtils.isEmpty(html)) return "";
 
@@ -559,9 +567,6 @@ public class SaoHuo extends Spider {
         return "";
     }
 
-    /**
-     * 从 HTML 抠 __HHJX_BOOTSTRAP__ = {...}
-     */
     private JSONObject extractBootstrap(String html) {
         if (TextUtils.isEmpty(html)) return null;
         Matcher m = Pattern.compile(
@@ -575,9 +580,6 @@ public class SaoHuo extends Spider {
         return null;
     }
 
-    /**
-     * 从文本抠 m3u8 地址
-     */
     private String extractM3u8(String text) {
         if (TextUtils.isEmpty(text)) return "";
         String[] patterns = {
@@ -597,9 +599,6 @@ public class SaoHuo extends Spider {
         return "";
     }
 
-    /**
-     * 构建返回 JSON
-     */
     private String buildResult(int parse, String url, String referer) throws Exception {
         JSONObject headerObj = new JSONObject();
         headerObj.put("User-Agent", UA);
@@ -613,13 +612,8 @@ public class SaoHuo extends Spider {
         return result.toString();
     }
 
-    /**
-     * POST JSON
-     */
     private String postJson(String url, String json, String referer) {
-        Response response = null;
         try {
-            OkHttpClient client = OkHttpUtil.defaultClient();
             RequestBody body = RequestBody.create(
                     MediaType.parse("application/json; charset=utf-8"), json);
             Request.Builder builder = new Request.Builder().url(url).post(body);
@@ -628,13 +622,9 @@ public class SaoHuo extends Spider {
             for (Map.Entry<String, String> e : h.entrySet()) {
                 builder.addHeader(e.getKey(), e.getValue());
             }
-            response = client.newCall(builder.build()).execute();
-            if (response.body() == null) return "";
-            return new String(response.body().bytes(), "UTF-8");
+            return execute(builder.build());   // 走 execute，更新 cookie
         } catch (Exception e) {
             return "";
-        } finally {
-            if (response != null) response.close();
         }
     }
 }
