@@ -77,11 +77,12 @@ public class CheckJar {
         // 2. apktool 反编译到临时目录
         Path work = Files.createTempDirectory("catvod-checkJar-");
         try {
-            Process p = new ProcessBuilder(
+            // ★ 改用 proc，避免和 lambda 参数名冲突
+            Process proc = new ProcessBuilder(
                 "java", "-jar", apktool.toString(), "d", "-f",
                 jar.toString(), "-o", work.toString()
             ).inheritIO().start();
-            if (p.waitFor() != 0) fail("apktool decode failed");
+            if (proc.waitFor() != 0) fail("apktool decode failed");
 
             Path smali = work.resolve("smali");
             if (!Files.exists(smali)) fail("missing smali output");
@@ -96,7 +97,8 @@ public class CheckJar {
             Path catvod = smali.resolve("com/github/catvod");
             if (!Files.exists(catvod)) fail("missing catvod package");
             try (Stream<Path> s = Files.list(catvod)) {
-                List<String> unexpected = s.map(p -> p.getFileName().toString())
+                // ★ lambda 参数改成 path
+                List<String> unexpected = s.map(path -> path.getFileName().toString())
                     .filter(n -> !n.equals("js") && !n.equals("spider"))
                     .sorted().collect(Collectors.toList());
                 if (!unexpected.isEmpty())
@@ -108,7 +110,8 @@ public class CheckJar {
             Set<String> refs = new HashSet<>();
             List<Path> smaliFiles;
             try (Stream<Path> s = Files.walk(smali)) {
-                smaliFiles = s.filter(p -> p.toString().endsWith(".smali"))
+                // ★ lambda 参数改成 path
+                smaliFiles = s.filter(path -> path.toString().endsWith(".smali"))
                     .collect(Collectors.toList());
             }
             for (Path file : smaliFiles) {
@@ -156,7 +159,7 @@ public class CheckJar {
     }
 
     private static boolean startsWithAny(String value, String[] prefixes) {
-        for (String p : prefixes) if (value.startsWith(p)) return true;
+        for (String pfx : prefixes) if (value.startsWith(pfx)) return true;
         return false;
     }
 
@@ -187,8 +190,8 @@ public class CheckJar {
     private static void deleteRecursively(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         try (Stream<Path> s = Files.walk(dir)) {
-            s.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+            s.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) {}
             });
         }
     }
