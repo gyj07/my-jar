@@ -32,6 +32,24 @@
   ],
   "sites": [
     {
+      "key": "dushe",
+      "name": "DuShe",
+      "type": 3,
+      "api": "csp_DuShe",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
+      "key": "saohuo",
+      "name": "SaoHuo",
+      "type": 3,
+      "api": "csp_SaoHuo",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "alist",
       "name": "AList",
       "type": 3,
