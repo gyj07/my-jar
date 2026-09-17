@@ -12,6 +12,7 @@ import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.utils.Util;
 import com.whl.quickjs.wrapper.JSArray;
+import com.whl.quickjs.wrapper.JSFunction;
 import com.whl.quickjs.wrapper.JSObject;
 import com.whl.quickjs.wrapper.QuickJSContext;
 
@@ -111,14 +112,12 @@ public class ShenMa extends Spider {
         "    var playFrom = [];\n" +
         "    var playUrl = [];\n" +
         "    var names = [];\n" +
-        // 线路名
         "    var tabRe = /<a[^>]*class=\"swiper-slide[^\"]*\"[^>]*>\\s*<i[^>]*><\\/i>&nbsp;([^<]+?)(?:<span[^>]*>\\d+<\\/span>)?<\\/a>/g;\n" +
         "    var tabM;\n" +
         "    while ((tabM = tabRe.exec(html)) !== null) {\n" +
         "        var n = tabM[1].trim();\n" +
         "        if (n && names.indexOf(n) < 0) names.push(n);\n" +
         "    }\n" +
-        // 剧集
         "    var ulRe = /<ul[^>]*class=\"anthology-list-play size\"[^>]*>([\\s\\S]*?)<\\/ul>/g;\n" +
         "    var ulM;\n" +
         "    var idx = 0;\n" +
@@ -360,14 +359,22 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // JS 调用
+    // JS 调用（★ 用 JSFunction，不是 JSObject）
     // ============================================================
     private String callJs(String method, Object... args) {
-        if (api == null) return "";
+        if (api == null) {
+            SpiderDebug.log("callJs " + method + ": api null");
+            return "";
+        }
         try {
             Object fn = api.getProperty(method);
-            if (!(fn instanceof JSObject)) return "";
-            Object r = ((JSObject) fn).call(args);
+            if (!(fn instanceof JSFunction)) {
+                SpiderDebug.log("callJs " + method + ": not a JSFunction, type=" +
+                        (fn == null ? "null" : fn.getClass().getName()));
+                return "";
+            }
+            JSFunction func = (JSFunction) fn;
+            Object r = func.call(args);
             return r == null ? "" : r.toString();
         } catch (Exception e) {
             SpiderDebug.log("callJs " + method + " error: " + e.getMessage());
