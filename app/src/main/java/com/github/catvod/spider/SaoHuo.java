@@ -4,622 +4,678 @@ import android.content.Context;
 import android.text.TextUtils;
 
 import com.github.catvod.crawler.Spider;
+import com.github.catvod.crawler.SpiderDebug;
+import com.github.catvod.net.OkHttp;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-
-/**
- * 骚火影视 SaoHuo
- *
- * 首页/分类/详情：Jsoup 解析
- * 播放：完整 hhplayer 流程
- */
 public class SaoHuo extends Spider {
 
     private String host = "https://shdy2.com";
     private String cookie = "";
 
-    private static final String UA =
-            "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/91.0.4472.114 Safari/537.36";
+    private static final String UA = "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) AppleWebKit/537.36";
 
-    // ==================== 共享 OkHttpClient（不叫 client，避免和基类冲突） ====================
-    private static OkHttpClient sharedClient;
+    private Map<String, String> headers;
 
-    private static synchronized OkHttpClient okClient() {
-        if (sharedClient == null) {
-            sharedClient = new OkHttpClient.Builder()
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(15, TimeUnit.SECONDS)
-                    .writeTimeout(15, TimeUnit.SECONDS)
-                    .build();
-        }
-        return sharedClient;
-    }
-
-    // ==================== 请求 ====================
-
-    private Map<String, String> headers() {
-        Map<String, String> h = new HashMap<>();
-        h.put("User-Agent", UA);
-        h.put("accept-language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7");
-        if (!TextUtils.isEmpty(cookie)) h.put("Cookie", cookie);
-        return h;
-    }
-
-    private Map<String, String> headers(String referer) {
-        Map<String, String> h = headers();
-        if (!TextUtils.isEmpty(referer)) h.put("Referer", referer);
-        return h;
-    }
-
-    private String request(String url) {
-        return request(url, null);
-    }
-
-    private String request(String url, String referer) {
-        try {
-            Request.Builder builder = new Request.Builder().url(url).get();
-            for (Map.Entry<String, String> e : headers(referer).entrySet()) {
-                builder.addHeader(e.getKey(), e.getValue());
-            }
-            return execute(builder.build());
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private String execute(Request request) {
-        Response response = null;
-        try {
-            response = okClient().newCall(request).execute();
-
-            // 更新 cookie
-            List<String> setCookies = response.headers("Set-Cookie");
-            if (setCookies != null && !setCookies.isEmpty()) {
-                Map<String, String> map = parseCookie(cookie);
-                for (String c : setCookies) {
-                    int end = c.indexOf(';');
-                    if (end > 0) c = c.substring(0, end);
-                    int eq = c.indexOf('=');
-                    if (eq > 0) map.put(c.substring(0, eq).trim(), c.substring(eq + 1).trim());
-                }
-                cookie = joinCookie(map);
-            }
-
-            if (response.body() == null) return "";
-            byte[] bytes = response.body().bytes();
-            return new String(bytes, "UTF-8");
-        } catch (Exception e) {
-            return "";
-        } finally {
-            if (response != null) response.close();
-        }
-    }
-
-    private Map<String, String> parseCookie(String c) {
-        Map<String, String> map = new HashMap<>();
-        if (TextUtils.isEmpty(c)) return map;
-        for (String part : c.split(";")) {
-            part = part.trim();
-            int eq = part.indexOf('=');
-            if (eq > 0) map.put(part.substring(0, eq).trim(), part.substring(eq + 1).trim());
-        }
-        return map;
-    }
-
-    private String joinCookie(Map<String, String> map) {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, String> e : map.entrySet()) {
-            if (sb.length() > 0) sb.append("; ");
-            sb.append(e.getKey()).append("=").append(e.getValue());
-        }
-        return sb.toString();
-    }
-
-    // ==================== init ====================
-
+    // ============================================================
+    // init
+    // ============================================================
     @Override
-    public void init(Context context, String extend) throws Exception {
-        super.init(context, extend);
-        if (!TextUtils.isEmpty(extend)) host = extend.trim();
+    public void init(Context context, String extend) {
+        if (!TextUtils.isEmpty(extend)) {
+            host = extend.trim();
+        }
+        headers = new HashMap<>();
+        headers.put("User-Agent", UA);
+        headers.put("accept-language", "zh-CN,zh;q=0.9");
+
+        // 初始化请求（拿 cookie）
         request(host);
     }
 
-    // ==================== 首页 ====================
+    // ============================================================
+    // request / postJson
+    // ============================================================
+    private String request(String url) {
+        return request(url, null, null);
+    }
 
+    private String request(String url, Map<String, String> extraHeaders, String referer) {
+        try {
+            Map<String, String> h = new HashMap<>(headers);
+            if (extraHeaders != null) h.putAll(extraHeaders);
+            if (referer != null) h.put("Referer", referer);
+            if (!cookie.isEmpty()) h.put("Cookie", cookie);
+
+            String body = OkHttp.string(url, h);
+            return body == null ? "" : body;
+        } catch (Exception e) {
+            SpiderDebug.log("request error: " + e.getMessage());
+            return "";
+        }
+    }
+
+    private String postJson(String url, JSONObject obj, String referer) {
+        try {
+            Map<String, String> h = new HashMap<>(headers);
+            h.put("Content-Type", "application/json");
+            if (referer != null) h.put("Referer", referer);
+
+            // 你的 OkHttp 没有 postJson，用 OkHttp.post(url, json, header) 或自己拼
+            // 这里假设 OkHttp 有 post(url, String body, Map header)
+            String body = OkHttp.post(url, obj.toString(), h).getBody();
+            return body == null ? "" : body;
+        } catch (Exception e) {
+            SpiderDebug.log("postJson error: " + e.getMessage());
+            return "";
+        }
+    }
+
+    // ============================================================
+    // home
+    // ============================================================
     @Override
-    public String homeContent(boolean filter) throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
+    public String homeContent(boolean filter) {
+        try {
+            JSONObject result = new JSONObject();
+            JSONArray classes = new JSONArray();
 
-        JSONArray classes = new JSONArray();
-        classes.put(clazz("1", "电影"));
-        classes.put(clazz("2", "电视剧"));
-        classes.put(clazz("20", "国产剧"));
-        classes.put(clazz("4", "动漫"));
+            String[][] cls = {
+                {"1", "电影"}, {"2", "电视剧"}, {"4", "动漫"}
+            };
+            for (String[] c : cls) {
+                JSONObject o = new JSONObject();
+                o.put("type_id", c[0]);
+                o.put("type_name", c[1]);
+                classes.put(o);
+            }
+            result.put("class", classes);
 
-        JSONObject filters = new JSONObject();
-        filters.put("1", arr(filterItem("cateId", "类型", new String[][]{
+            JSONObject filters = new JSONObject();
+            filters.put("1", buildFilterArr(buildFilterGroup("cateId", "类型", new String[][]{
                 {"全部", "1"}, {"喜剧", "6"}, {"爱情", "7"}, {"恐怖", "8"},
                 {"动作", "9"}, {"科幻", "10"}, {"战争", "11"}, {"犯罪", "12"},
                 {"动画", "13"}, {"奇幻", "14"}, {"剧情", "15"}, {"冒险", "16"},
                 {"悬疑", "17"}, {"惊悚", "18"}, {"其他", "20"}
-        })));
-        filters.put("2", arr(filterItem("cateId", "类型", new String[][]{
+            })));
+            filters.put("2", buildFilterArr(buildFilterGroup("cateId", "类型", new String[][]{
                 {"全部", "2"}, {"国产剧", "20"}, {"TVB", "21"}, {"韩剧", "22"},
-                {"美剧", "23"}, {"日剧", "24"}, {"英剧", "25"}, {"台剧", "26"},
-                {"其他", "27"}
-        })));
-        filters.put("4", arr(filterItem("cateId", "类型", new String[][]{
+                {"美剧", "23"}, {"日剧", "24"}, {"英剧", "25"}, {"台剧", "26"}, {"其他", "27"}
+            })));
+            filters.put("4", buildFilterArr(buildFilterGroup("cateId", "类型", new String[][]{
                 {"全部", "4"}, {"搞笑", "38"}, {"恋爱", "39"}, {"热血", "40"},
                 {"格斗", "41"}, {"美少女", "42"}, {"魔法", "43"}, {"机战", "44"},
                 {"校园", "45"}, {"亲子", "46"}, {"童话", "47"}, {"冒险", "48"},
                 {"真人", "49"}, {"LOLI", "50"}, {"其他", "51"}
-        })));
+            })));
+            result.put("filters", filters);
 
-        JSONObject result = new JSONObject();
-        result.put("class", classes);
-        result.put("filters", filters);
-        return result.toString();
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log("homeContent error: " + e.getMessage());
+            return "";
+        }
     }
 
-    private JSONObject clazz(String id, String name) throws Exception {
-        JSONObject o = new JSONObject();
-        o.put("type_id", id);
-        o.put("type_name", name);
-        return o;
-    }
-
-    private JSONArray arr(JSONObject... items) {
-        JSONArray a = new JSONArray();
-        for (JSONObject o : items) a.put(o);
-        return a;
-    }
-
-    private JSONObject filterItem(String key, String name, String[][] values) throws Exception {
-        JSONObject o = new JSONObject();
-        o.put("key", key);
-        o.put("name", name);
+    private JSONObject buildFilterGroup(String key, String name, String[][] values) throws Exception {
+        JSONObject g = new JSONObject();
+        g.put("key", key);
+        g.put("name", name);
         JSONArray arr = new JSONArray();
         for (String[] v : values) {
-            JSONObject item = new JSONObject();
-            item.put("n", v[0]);
-            item.put("v", v[1]);
-            arr.put(item);
+            JSONObject o = new JSONObject();
+            o.put("n", v[0]);
+            o.put("v", v[1]);
+            arr.put(o);
         }
-        o.put("value", arr);
-        return o;
+        g.put("value", arr);
+        return g;
     }
 
+    private JSONArray buildFilterArr(JSONObject... items) {
+        JSONArray arr = new JSONArray();
+        for (JSONObject o : items) arr.put(o);
+        return arr;
+    }
+
+    // ============================================================
+    // homeVod
+    // ============================================================
     @Override
-    public String homeVideoContent() throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
-        String html = request(host);
-        JSONObject result = new JSONObject();
-        if (TextUtils.isEmpty(html)) {
-            result.put("list", new JSONArray());
+    public String homeVideoContent() {
+        try {
+            if (TextUtils.isEmpty(host)) init(null, null);
+            String html = request(host);
+            if (html.isEmpty()) {
+                JSONObject r = new JSONObject();
+                r.put("list", new JSONArray());
+                return r.toString();
+            }
+            List<JSONObject> list = extractList(html, 6);
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
             return result.toString();
+        } catch (Exception e) {
+            return "";
         }
-        result.put("list", parseList(html, 6));
-        return result.toString();
     }
 
-    // ==================== 列表解析 ====================
-
-    private JSONArray parseList(String html, int limit) throws Exception {
-        JSONArray list = new JSONArray();
-        if (TextUtils.isEmpty(html)) return list;
-
-        Document doc = Jsoup.parse(html);
-        Elements items = doc.select(".v_list li, .module-item, .myui-vodlist__box, " +
-                ".stui-vodlist__box, li.vodlist_box");
-
-        int count = 0;
-        for (Element el : items) {
-            if (limit > 0 && count >= limit) break;
-
-            Element a = el.selectFirst("a");
-            if (a == null) continue;
-
-            String href = a.attr("href");
-            String title = a.attr("title");
-            if (TextUtils.isEmpty(title)) {
-                Element img0 = a.selectFirst("img");
-                if (img0 != null) title = img0.attr("alt");
-            }
-            if (TextUtils.isEmpty(href) || TextUtils.isEmpty(title)) continue;
-
-            String pic = "";
-            Element img = a.selectFirst("img");
-            if (img != null) {
-                pic = img.attr("data-original");
-                if (TextUtils.isEmpty(pic)) pic = img.attr("src");
-            }
-
-            String remarks = "";
-            Element note = el.selectFirst(".v_note, .continu, .pic-text, .pic-tag, .module-item-note");
-            if (note != null) remarks = note.text().trim();
-
-            JSONObject vod = new JSONObject();
-            vod.put("vod_id", href.startsWith("http") ? href : (host + href));
-            vod.put("vod_name", title);
-            vod.put("vod_pic", pic.startsWith("http") ? pic : (host + pic));
-            vod.put("vod_remarks", remarks);
-            list.put(vod);
-
-            count++;
-        }
-        return list;
-    }
-
-    // ==================== 分类 ====================
-
+    // ============================================================
+    // category
+    // ============================================================
     @Override
-    public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend)
-            throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
+    public String categoryContent(String tid, String pg, boolean filter,
+                                  HashMap<String, String> extend) {
+        try {
+            if (TextUtils.isEmpty(host)) init(null, null);
+            int page = 1;
+            try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
 
-        int page = 1;
-        try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
-        if (page < 1) page = 1;
+            String cateId = (extend != null && extend.get("cateId") != null)
+                    ? extend.get("cateId") : tid;
 
-        String cateId = (extend != null && !TextUtils.isEmpty(extend.get("cateId")))
-                ? extend.get("cateId") : tid;
+            String url = host + "/list/" + cateId;
+            if (page > 1) url += "-" + page;
+            url += ".html";
 
-        String url = host + String.format("/list/%s-%s.html", cateId, page);
-
-        String html = request(url);
-        JSONArray list = parseList(html, 0);
-
-        int pagecount = page;
-        Document doc = Jsoup.parse(html == null ? "" : html);
-        Elements pageLinks = doc.select(".page a, .pagination a, #page a, .pages a");
-        if (!pageLinks.isEmpty()) {
-            int maxPage = 0;
-            Pattern p = Pattern.compile("-?(\\d+)\\.html");
-            for (Element a : pageLinks) {
-                Matcher m = p.matcher(a.attr("href"));
-                if (m.find()) {
-                    try {
-                        int n = Integer.parseInt(m.group(1));
-                        if (n > maxPage) maxPage = n;
-                    } catch (Exception ignored) {}
-                }
+            String html = request(url);
+            if (html.isEmpty()) {
+                JSONObject r = new JSONObject();
+                r.put("list", new JSONArray());
+                r.put("page", page);
+                r.put("pagecount", 1);
+                return r.toString();
             }
-            if (maxPage > 0) pagecount = maxPage;
-        } else if (list.length() >= 10) {
-            pagecount = page + 1;
-        }
 
-        JSONObject result = new JSONObject();
-        result.put("list", list);
-        result.put("page", page);
-        result.put("pagecount", pagecount);
-        result.put("limit", list.length());
-        result.put("total", pagecount * list.length());
-        return result.toString();
+            List<JSONObject> list = extractList(html, 0);
+            int pagecount = extractPageCount(html, page, list.size());
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
+            result.put("page", page);
+            result.put("pagecount", pagecount);
+            result.put("limit", list.size());
+            result.put("total", pagecount * list.size());
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log("categoryContent error: " + e.getMessage());
+            return "";
+        }
     }
 
-    // ==================== 详情 ====================
-
+    // ============================================================
+    // detail
+    // ============================================================
     @Override
-    public String detailContent(List<String> ids) throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
-        String id = ids.get(0);
-        String url = id.startsWith("http") ? id : (host + id);
-        String html = request(url);
-        if (TextUtils.isEmpty(html)) {
-            JSONObject r = new JSONObject();
-            r.put("list", new JSONArray());
-            return r.toString();
-        }
+    public String detailContent(List<String> ids) {
+        try {
+            if (TextUtils.isEmpty(host)) init(null, null);
+            String id = ids.get(0);
+            String url = id.startsWith("http") ? id : (host + id);
+            String html = request(url);
+            if (html.isEmpty()) {
+                JSONObject r = new JSONObject();
+                r.put("list", new JSONArray());
+                return r.toString();
+            }
 
-        Document doc = Jsoup.parse(html);
+            JSONObject info = new JSONObject();
+            info.put("vod_id", id);
 
-        String vodName = "";
-        Element h1 = doc.selectFirst("h1.v_title, h1.title");
-        if (h1 != null) vodName = h1.text().trim().replaceAll("\\s*-.*$", "");
+            String name = group("<h1[^>]*class=\"v_title[^\"]*\"[^>]*>([^<]+)</h1>", html, 1);
+            if (name.isEmpty()) {
+                name = group("<h1[^>]*class=\"title[^\"]*\"[^>]*>([^<]+)</h1>", html, 1);
+            }
+            name = name.replaceAll("\\s*-.*$", "").trim();
+            info.put("vod_name", name);
 
-        String vodPic = "";
-        Element img = doc.selectFirst("img.lazyload");
-        if (img != null) {
-            vodPic = img.attr("data-original");
-            if (TextUtils.isEmpty(vodPic)) vodPic = img.attr("src");
-        }
-        if (!TextUtils.isEmpty(vodPic) && !vodPic.startsWith("http")) vodPic = host + vodPic;
+            String pic = group("<img[^>]*class=\"lazyload\"[^>]*data-original=\"([^\"]+)\"", html, 1);
+            if (pic.isEmpty()) {
+                pic = group("<img[^>]*class=\"lazyload\"[^>]*src=\"([^\"]+)\"", html, 1);
+            }
+            if (!pic.isEmpty() && !pic.startsWith("http")) pic = host + pic;
+            info.put("vod_pic", pic);
 
-        String vodRemarks = doc.select(".score, .text-red").text().trim();
+            String remarks = group("<[^>]*class=\"score\"[^>]*>([^<]*)</", html, 1);
+            if (remarks.isEmpty()) {
+                remarks = group("<[^>]*class=\"text-red\"[^>]*>([^<]*)</", html, 1);
+            }
+            info.put("vod_remarks", remarks.trim());
 
-        String typeName = "", vodArea = "", vodYear = "";
-        String vodDirector = "", vodActor = "";
-
-        Element infoP = doc.selectFirst(".v_info_box p");
-        if (infoP != null) {
-            String infoStr = infoP.text().trim();
-            if (!TextUtils.isEmpty(infoStr)) {
+            // 参数（来自 .v_info_box p）
+            String infoStr = group("<[^>]*class=\"v_info_box\"[^>]*>\\s*<p[^>]*>([^<]+)</p>", html, 1);
+            if (infoStr.isEmpty()) {
+                infoStr = group("<[^>]*class=\"v_info_box\"[^>]*>([\\s\\S]*?)</div>", html, 1);
+                infoStr = infoStr.replaceAll("<[^>]+>", "").trim();
+            }
+            infoStr = infoStr.trim();
+            String vodArea = "", vodYear = "", typeName = "", vodDirector = "", vodActor = "";
+            if (!infoStr.isEmpty()) {
                 String[] segs = infoStr.split("/");
-                for (int i = 0; i < segs.length; i++) segs[i] = segs[i].trim();
                 if (segs.length >= 3) {
-                    vodArea = segs[0];
-                    vodYear = segs[1];
-                    typeName = segs[2];
+                    vodArea = segs[0].trim();
+                    vodYear = segs[1].trim();
+                    typeName = segs[2].trim();
                     for (int i = 3; i < segs.length; i++) {
-                        String seg = segs[i];
-                        if (seg.startsWith("导演:")) vodDirector = seg.replace("导演:", "").trim();
-                        else if (seg.startsWith("主演:")) {
-                            vodActor = seg.replace("主演:", "").trim();
+                        String seg = segs[i].trim();
+                        if (seg.startsWith("导演:")) {
+                            vodDirector = seg.substring(3).trim();
+                        } else if (seg.startsWith("主演:")) {
+                            vodActor = seg.substring(3).trim();
                             vodActor = vodActor.replaceAll("剧情介绍.*$", "").trim();
                         }
                     }
                 }
             }
+            info.put("vod_director", vodDirector);
+            info.put("vod_actor", vodActor);
+            info.put("vod_area", vodArea);
+            info.put("vod_year", vodYear);
+            info.put("vod_class", typeName);
+
+            // 简介
+            String content = group("<[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)</", html, 1);
+            if (content.isEmpty()) {
+                content = group("<[^>]*class=\"des\"[^>]*>([\\s\\S]*?)</", html, 1);
+            }
+            if (content.isEmpty()) {
+                content = group("<p[^>]*class=\"p_txt\"[^>]*>([\\s\\S]*?)</p>", html, 1);
+            }
+            if (content.isEmpty()) {
+                content = group("<div[^>]*id=\"info_more\"[^>]*>([\\s\\S]*?)</div>", html, 1);
+            }
+            info.put("vod_content", content.replaceAll("<[^>]+>", "").trim());
+
+            // 播放列表
+            String[] pl = extractPlaylist(html);
+            info.put("vod_play_from", pl[0]);
+            info.put("vod_play_url", pl[1]);
+
+            JSONArray list = new JSONArray();
+            list.put(info);
+            JSONObject result = new JSONObject();
+            result.put("list", list);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log("detailContent error: " + e.getMessage());
+            return "";
         }
+    }
 
-        String vodContent = doc.select(".intro, .des, p.p_txt").text().trim();
-        if (TextUtils.isEmpty(vodContent)) vodContent = doc.select("#info_more").text().trim();
-
+    // ============================================================
+    // 播放列表（原版用 cheerio 查 .play_from ul.from_list li + #play_link > li）
+    // Java 里用正则逐块抠
+    // ============================================================
+    private String[] extractPlaylist(String html) {
         List<String> sourceNames = new ArrayList<>();
         List<String> sourceUrls = new ArrayList<>();
 
-        Elements fromList = doc.select(".play_from ul.from_list li");
-        Elements linkBlocks = doc.select("#play_link > li");
-
-        if (!fromList.isEmpty() && !linkBlocks.isEmpty() && fromList.size() == linkBlocks.size()) {
-            for (int i = 0; i < fromList.size(); i++) {
-                sourceNames.add(fromList.get(i).text().trim());
-                sourceUrls.add(parseEpisodes(linkBlocks.get(i)));
-            }
-        } else if (!linkBlocks.isEmpty()) {
-            for (int i = 0; i < linkBlocks.size(); i++) {
-                sourceNames.add("线路" + (i + 1));
-                sourceUrls.add(parseEpisodes(linkBlocks.get(i)));
+        // 找 from_list 里的线路名
+        Matcher fromM = Pattern.compile(
+            "<[^>]*class=\"[^\"]*from_list[^\"]*\"[^>]*>([\\s\\S]*?)</ul>", Pattern.DOTALL
+        ).matcher(html);
+        List<String> tmpNames = new ArrayList<>();
+        while (fromM.find()) {
+            String block = fromM.group(1);
+            Matcher liM = Pattern.compile("<li[^>]*>([\\s\\S]*?)</li>").matcher(block);
+            while (liM.find()) {
+                String li = liM.group(1);
+                String name = li.replaceAll("<[^>]+>", "").trim();
+                if (!name.isEmpty()) tmpNames.add(name);
             }
         }
 
-        JSONObject vod = new JSONObject();
-        vod.put("vod_id", id);
-        vod.put("vod_name", vodName);
-        vod.put("vod_pic", vodPic);
-        vod.put("vod_content", vodContent);
-        vod.put("vod_play_from", TextUtils.join("$$$", sourceNames));
-        vod.put("vod_play_url", TextUtils.join("$$$", sourceUrls));
-        vod.put("vod_director", vodDirector);
-        vod.put("vod_actor", vodActor);
-        vod.put("type_name", typeName);
-        vod.put("vod_area", vodArea);
-        vod.put("vod_year", vodYear);
-        vod.put("vod_remarks", vodRemarks);
+        // 找 #play_link 里的剧集块
+        Matcher linkM = Pattern.compile(
+            "<ul[^>]*id=\"play_link\"[^>]*>([\\s\\S]*?)</ul>", Pattern.DOTALL
+        ).matcher(html);
+        List<String> linkBlocks = new ArrayList<>();
+        while (linkM.find()) {
+            linkBlocks.add(linkM.group(1));
+        }
 
-        JSONArray jsonArray = new JSONArray();
-        jsonArray.put(vod);
-        JSONObject result = new JSONObject();
-        result.put("list", jsonArray);
-        return result.toString();
-    }
-
-    private String parseEpisodes(Element block) {
-        List<Ep> eps = new ArrayList<>();
-        Elements links = block.select("a");
-        for (int i = 0; i < links.size(); i++) {
-            Element a = links.get(i);
-            String href = a.attr("href");
-            String text = a.text().trim();
-            int num = i + 1;
-            String digits = text.replaceAll("[^0-9]", "");
-            if (!TextUtils.isEmpty(digits)) {
-                try { num = Integer.parseInt(digits); } catch (Exception ignored) {}
+        // 如果 #play_link 是 ul，里面每个 li 是一线路
+        if (!linkBlocks.isEmpty()) {
+            String inner = linkBlocks.get(0);
+            Matcher liM = Pattern.compile("<li[^>]*>([\\s\\S]*?)</li>", Pattern.DOTALL).matcher(inner);
+            int idx = 0;
+            while (liM.find()) {
+                String block = liM.group(1);
+                List<String[]> eps = extractEpisodes(block);
+                if (!eps.isEmpty()) {
+                    String name = idx < tmpNames.size() ? tmpNames.get(idx) : ("线路" + (idx + 1));
+                    sourceNames.add(name);
+                    sourceUrls.add(joinEpisodes(eps));
+                }
+                idx++;
             }
-            eps.add(new Ep(text, href, num));
         }
-        eps.sort((a, b) -> a.num - b.num);
 
-        List<String> out = new ArrayList<>();
-        for (Ep ep : eps) {
-            out.add(ep.text + "$" + (ep.href.startsWith("http") ? ep.href : host + ep.href));
+        // 兜底：直接找 #play_link
+        if (sourceNames.isEmpty()) {
+            Matcher liM = Pattern.compile("<li[^>]*>([\\s\\S]*?)</li>", Pattern.DOTALL).matcher(html);
+            int idx = 0;
+            while (liM.find()) {
+                String block = liM.group(1);
+                if (!block.contains("play_link") && !block.contains("<a")) continue;
+                List<String[]> eps = extractEpisodes(block);
+                if (!eps.isEmpty()) {
+                    sourceNames.add("线路" + (idx + 1));
+                    sourceUrls.add(joinEpisodes(eps));
+                    idx++;
+                }
+            }
         }
-        return TextUtils.join("#", out);
+
+        return new String[]{String.join("$$$", sourceNames), String.join("$$$", sourceUrls)};
     }
 
-    private static class Ep {
-        String text, href;
-        int num;
-        Ep(String t, String h, int n) { text = t; href = h; num = n; }
+    private List<String[]> extractEpisodes(String block) {
+        List<String[]> eps = new ArrayList<>();
+        Matcher aM = Pattern.compile("<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>").matcher(block);
+        while (aM.find()) {
+            String href = aM.group(1);
+            String text = aM.group(2).trim();
+            // 提取数字
+            String numStr = text.replaceAll("[^0-9]", "");
+            int num = 9999;
+            if (!numStr.isEmpty()) {
+                try { num = Integer.parseInt(numStr); } catch (Exception ignored) {}
+            }
+            eps.add(new String[]{text, href, String.valueOf(num)});
+        }
+        // 按 num 排序
+        eps.sort((a, b) -> {
+            try { return Integer.parseInt(a[2]) - Integer.parseInt(b[2]); }
+            catch (Exception e) { return 0; }
+        });
+        return eps;
     }
 
-    // ==================== 搜索 ====================
+    private String joinEpisodes(List<String[]> eps) {
+        List<String> parts = new ArrayList<>();
+        for (String[] ep : eps) {
+            parts.add(ep[0] + "$" + ep[1]);
+        }
+        return String.join("#", parts);
+    }
 
+    // ============================================================
+    // search
+    // ============================================================
     @Override
-    public String searchContent(String key, boolean quick) throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
-        String url = host + "/s----------.html?wd=" + URLEncoder.encode(key, "UTF-8");
-        String html = request(url);
-        JSONObject result = new JSONObject();
-        if (TextUtils.isEmpty(html)) {
-            result.put("list", new JSONArray());
+    public String searchContent(String wd, boolean quick) {
+        try {
+            if (TextUtils.isEmpty(host)) init(null, null);
+            String url = host + "/s----------.html?wd=" + urlEncode(wd);
+            String html = request(url);
+            if (html.isEmpty()) {
+                JSONObject r = new JSONObject();
+                r.put("list", new JSONArray());
+                return r.toString();
+            }
+            List<JSONObject> list = extractList(html, 0);
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
             return result.toString();
+        } catch (Exception e) {
+            return "";
         }
-        result.put("list", parseList(html, 0));
-        return result.toString();
     }
 
-    // ==================== 播放（完整 hhplayer 解析） ====================
-
+    // ============================================================
+    // play（三层：播放页 → hhplayer → POST /api/parse）
+    // ============================================================
     @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        if (TextUtils.isEmpty(cookie)) request(host);
-
-        String playPageUrl = id.startsWith("http") ? id : (host + id);
-
-        // 1. 抓播放页
-        String html = request(playPageUrl);
-
-        // 1a. 播放页里直接有 m3u8
-        if (!TextUtils.isEmpty(html)) {
-            String direct = extractM3u8(html);
-            if (!TextUtils.isEmpty(direct)) {
-                return buildResult(0, direct, playPageUrl);
-            }
-        }
-
-        // 2. 提取 iframe src（hhplayer 地址）
-        String hhUrl = extractHhUrl(html);
-        if (TextUtils.isEmpty(hhUrl)) {
-            return buildResult(0, playPageUrl, playPageUrl);
-        }
-
-        // 3. 抓 hhplayer 页面
-        String hhHtml = request(hhUrl, playPageUrl);
-
-        // 3a. hhplayer 页面里直接有 m3u8
-        if (!TextUtils.isEmpty(hhHtml)) {
-            String direct = extractM3u8(hhHtml);
-            if (!TextUtils.isEmpty(direct)) {
-                return buildResult(0, direct, hhUrl);
-            }
-        }
-
-        // 4. 提取 __HHJX_BOOTSTRAP__
-        JSONObject boot = extractBootstrap(hhHtml);
-        if (boot == null || TextUtils.isEmpty(boot.optString("url")) || TextUtils.isEmpty(boot.optString("key"))) {
-            return buildResult(0, hhUrl, hhUrl);
-        }
-
-        // 5. POST /api/parse
-        String hhDomain = "";
+    public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
-            java.net.URI uri = new java.net.URI(hhUrl);
-            hhDomain = uri.getHost();
-        } catch (Exception ignored) {}
-        String apiUrl = "https://" + hhDomain + "/api/parse";
+            String playPageUrl = id.startsWith("http") ? id : ((TextUtils.isEmpty(host) ? "https://shdy2.com" : host) + id);
 
-        JSONObject postBody = new JSONObject();
-        postBody.put("url", boot.optString("url"));
-        postBody.put("t", boot.optString("t", ""));
-        postBody.put("key", boot.optString("key"));
-        postBody.put("client_fallback", false);
-
-        String respText = postJson(apiUrl, postBody.toString(), hhUrl);
-
-        if (TextUtils.isEmpty(respText)) {
-            return buildResult(0, hhUrl, hhUrl);
-        }
-
-        // 6. 解析响应
-        try {
-            JSONObject resp = new JSONObject(respText);
-            if (resp.optInt("code") == 200 && resp.has("url")) {
-                String m3u8 = resp.optString("url")
-                        .replace("\\u0026", "&")
-                        .replace("\\/", "/");
-                return buildResult(0, m3u8, hhUrl);
+            // 1. 播放页
+            String html = request(playPageUrl);
+            if (!html.isEmpty()) {
+                String direct = extractM3u8(html);
+                if (!direct.isEmpty()) {
+                    return buildResult(0, direct, null, 0);
+                }
             }
-        } catch (Exception ignored) {
-            String m3u8 = extractM3u8(respText);
-            if (!TextUtils.isEmpty(m3u8)) {
-                return buildResult(0, m3u8, hhUrl);
-            }
-        }
 
-        return buildResult(0, hhUrl, hhUrl);
+            String hhUrl = extractHhUrl(html);
+            if (hhUrl.isEmpty()) {
+                return buildResult(0, playPageUrl, null, 0);
+            }
+
+            // 2. hhplayer 页面
+            Map<String, String> hhHeaders = new HashMap<>();
+            hhHeaders.put("Referer", playPageUrl);
+            String hhHtml = request(hhUrl, hhHeaders, null);
+
+            if (!hhHtml.isEmpty()) {
+                String direct = extractM3u8(hhHtml);
+                if (!direct.isEmpty()) {
+                    return buildResult(0, direct, null, 0);
+                }
+            }
+
+            JSONObject boot = extractBootstrap(hhHtml);
+            if (boot == null || !boot.has("url") || !boot.has("key")) {
+                return buildResult(0, hhUrl, null, 0);
+            }
+
+            // 3. POST /api/parse
+            String hhDomain = "";
+            Matcher dm = Pattern.compile("^https?://([^/]+)").matcher(hhUrl);
+            if (dm.find()) hhDomain = dm.group(1);
+            String apiUrl = "https://" + hhDomain + "/api/parse";
+
+            JSONObject reqBody = new JSONObject();
+            reqBody.put("url", boot.optString("url"));
+            reqBody.put("t", boot.opt("t"));
+            reqBody.put("key", boot.optString("key"));
+            reqBody.put("client_fallback", false);
+
+            String respText = postJson(apiUrl, reqBody, hhUrl);
+            if (respText.isEmpty()) {
+                return buildResult(0, hhUrl, null, 0);
+            }
+
+            JSONObject resp = null;
+            try {
+                resp = new JSONObject(respText);
+            } catch (Exception e) {
+                String fb = extractM3u8(respText);
+                if (!fb.isEmpty()) {
+                    return buildResult(0, fb, null, 0);
+                }
+                return buildResult(0, hhUrl, null, 0);
+            }
+
+            if (resp == null || resp.optInt("code", 0) != 200 || !resp.has("url")) {
+                return buildResult(0, hhUrl, null, 0);
+            }
+
+            String m3u8 = resp.optString("url").replace("\\u0026", "&").replace("\\/", "/");
+
+            Map<String, String> playHeaders = new HashMap<>();
+            playHeaders.put("Referer", hhUrl);
+            playHeaders.put("User-Agent", UA);
+
+            return buildResult(0, m3u8, playHeaders, 0);
+        } catch (Exception e) {
+            SpiderDebug.log("playerContent error: " + e.getMessage());
+            return "";
+        }
     }
 
-    // ==================== 播放工具 ====================
+    private String buildResult(int parse, String url, Map<String, String> h, int jx) {
+        try {
+            JSONObject r = new JSONObject();
+            r.put("parse", parse);
+            r.put("url", url);
+            r.put("jx", jx);
+            if (h != null) {
+                JSONObject ho = new JSONObject();
+                for (Map.Entry<String, String> e : h.entrySet()) ho.put(e.getKey(), e.getValue());
+                r.put("headers", ho);
+            }
+            return r.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
+    // ============================================================
+    // extractHhUrl
+    // ============================================================
     private String extractHhUrl(String html) {
-        if (TextUtils.isEmpty(html)) return "";
-
+        if (html == null || html.isEmpty()) return "";
         Matcher m = Pattern.compile(
-                "<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9_\\-/]+)[\"']",
-                Pattern.CASE_INSENSITIVE
+            "<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9]+)[\"']",
+            Pattern.CASE_INSENSITIVE
         ).matcher(html);
         if (m.find()) return m.group(1).replace("&amp;", "&");
 
-        m = Pattern.compile(
-                "(https?://[^\"'\\s<>]+[?&]url=[A-Za-z0-9_\\-/]+)",
-                Pattern.CASE_INSENSITIVE
-        ).matcher(html);
+        m = Pattern.compile("(https?://[^\"'\\s<>]+[?&]url=[A-Za-z0-9]+)").matcher(html);
         if (m.find()) return m.group(1).replace("&amp;", "&");
-
         return "";
     }
 
+    // ============================================================
+    // extractBootstrap
+    // ============================================================
     private JSONObject extractBootstrap(String html) {
-        if (TextUtils.isEmpty(html)) return null;
-        Matcher m = Pattern.compile(
-                "__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^}]+\\})"
-        ).matcher(html);
-        if (m.find()) {
-            try {
-                return new JSONObject(m.group(1));
-            } catch (Exception ignored) {}
+        if (html == null || html.isEmpty()) return null;
+        Matcher m = Pattern.compile("__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^}]+\\})").matcher(html);
+        if (!m.find()) return null;
+        try {
+            return new JSONObject(m.group(1));
+        } catch (Exception e) {
+            return null;
         }
-        return null;
     }
 
+    // ============================================================
+    // extractM3u8
+    // ============================================================
     private String extractM3u8(String text) {
-        if (TextUtils.isEmpty(text)) return "";
+        if (text == null || text.isEmpty()) return "";
         String[] patterns = {
-                "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
-                "\"m3u8_url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
-                "(https?:[^\"'\\s\\\\<>]+?\\.m3u8[^\"'\\s\\\\<>]*)"
+            "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
+            "\"m3u8_url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
+            "(https?:[^\"'\\s\\\\<>]+?\\.m3u8[^\"'\\s\\\\<>]*)"
         };
         for (String p : patterns) {
             Matcher m = Pattern.compile(p, Pattern.CASE_INSENSITIVE).matcher(text);
             if (m.find()) {
-                return m.group(1)
-                        .replace("\\u0026", "&")
-                        .replace("\\/", "/")
-                        .replace("&amp;", "&");
+                return m.group(1).replace("\\u0026", "&").replace("\\/", "/").replace("&amp;", "&");
             }
         }
         return "";
     }
 
-    private String buildResult(int parse, String url, String referer) throws Exception {
-        JSONObject headerObj = new JSONObject();
-        headerObj.put("User-Agent", UA);
-        if (!TextUtils.isEmpty(referer)) headerObj.put("Referer", referer);
-        if (!TextUtils.isEmpty(cookie)) headerObj.put("Cookie", cookie);
+    // ============================================================
+    // 列表解析（原版用 cheerio 查 .v_list li 等 5 种选择器）
+    // ============================================================
+    private List<JSONObject> extractList(String html, int limit) {
+        List<JSONObject> list = new ArrayList<>();
+        if (html == null || html.isEmpty()) return list;
+        try {
+            // 通用：找所有含 <a href> + img 的卡片块
+            // 原版多选择器：.v_list li / .module-item / .myui-vodlist__box / .stui-vodlist__box / li.vodlist_box
+            // Java 简化：匹配所有 <a href="..." title="...">...<img data-original="...">...</a>
+            Pattern cardPattern = Pattern.compile(
+                "<a[^>]*href=\"([^\"]+)\"[^>]*title=\"([^\"]*)\"[^>]*>[\\s\\S]*?" +
+                "<img[^>]*(?:data-original|src)=\"([^\"]+)\"[^>]*>[\\s\\S]*?" +
+                "</a>"
+            );
+            Matcher m = cardPattern.matcher(html);
+            List<String> seen = new ArrayList<>();
+            int count = 0;
+            while (m.find()) {
+                if (limit > 0 && count >= limit) break;
+                String href = m.group(1);
+                String title = m.group(2) == null ? "" : m.group(2).trim();
+                String pic = m.group(3) == null ? "" : m.group(3);
 
-        JSONObject result = new JSONObject();
-        result.put("parse", parse);
-        result.put("url", url);
-        result.put("header", headerObj.toString());
-        return result.toString();
+                if (title.isEmpty() || href.isEmpty()) continue;
+                if (seen.contains(href)) continue;
+                seen.add(href);
+
+                String vodId = href.startsWith("http") ? href : (host + href);
+                String vodPic = pic.startsWith("http") ? pic : (host + pic);
+
+                JSONObject o = new JSONObject();
+                o.put("vod_id", vodId);
+                o.put("vod_name", title);
+                o.put("vod_pic", vodPic);
+                o.put("vod_remarks", "");
+                list.add(o);
+                count++;
+            }
+        } catch (Exception e) {
+            SpiderDebug.log("extractList error: " + e.getMessage());
+        }
+        return list;
     }
 
-    private String postJson(String url, String json, String referer) {
+    // ============================================================
+    // extractPageCount
+    // ============================================================
+    private int extractPageCount(String html, int page, int listSize) {
+        int pagecount = page;
         try {
-            RequestBody body = RequestBody.create(
-                    MediaType.parse("application/json; charset=utf-8"), json);
-            Request.Builder builder = new Request.Builder().url(url).post(body);
-            Map<String, String> h = headers(referer);
-            h.put("Content-Type", "application/json");
-            for (Map.Entry<String, String> e : h.entrySet()) {
-                builder.addHeader(e.getKey(), e.getValue());
+            Matcher m = Pattern.compile("<a[^>]*href=\"[^\"]*[-_](\\d+)\\.html\"[^>]*>").matcher(html);
+            int maxPage = 0;
+            while (m.find()) {
+                try {
+                    int p = Integer.parseInt(m.group(1));
+                    if (p > maxPage) maxPage = p;
+                } catch (Exception ignored) {}
             }
-            return execute(builder.build());
+            if (maxPage > 0) pagecount = maxPage;
+            else if (listSize >= 10) pagecount = page + 1;
+        } catch (Exception ignored) {}
+        return pagecount;
+    }
+
+    // ============================================================
+    // 工具
+    // ============================================================
+    private String group(String regex, String text, int g) {
+        if (text == null) return "";
+        Matcher m = Pattern.compile(regex, Pattern.DOTALL).matcher(text);
+        return m.find() ? (m.group(g) == null ? "" : m.group(g)) : "";
+    }
+
+    private String urlEncode(String s) {
+        try {
+            return URLEncoder.encode(s == null ? "" : s, "UTF-8");
         } catch (Exception e) {
             return "";
         }
+    }
+
+    @Override
+    public void destroy() {
+        SpiderDebug.log("SaoHuo destroy");
     }
 }
