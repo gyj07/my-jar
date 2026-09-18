@@ -24,7 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public class NaiShi extends Spider {
+public class NsVod extends Spider {
 
     private static final String JS_CODE =
         "var HOST = 'https://nsvod.cc';\n" +
