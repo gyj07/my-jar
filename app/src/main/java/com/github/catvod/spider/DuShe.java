@@ -14,17 +14,20 @@ import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class DuShe extends Spider {
 
     private static final String DEFAULT_HOST = "https://www.dushehub.com";
-    private String host = DEFAULT_HOST;
+    private static final String PROXY_HOST = "https://v.dushe.online";
 
-    private static final String JX_HOST = "https://v.dushe.online";
+    private String host = DEFAULT_HOST;
 
     private static final String UA = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36";
 
@@ -45,9 +48,8 @@ public class DuShe extends Spider {
         }
         headers = new HashMap<>();
         headers.put("User-Agent", UA);
-        headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
         headers.put("Referer", host + "/");
+        headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 
         m3u8Headers = new HashMap<>();
         m3u8Headers.put("User-Agent", UA);
@@ -67,42 +69,35 @@ public class DuShe extends Spider {
     // ============================================================
     // 工具
     // ============================================================
-    private String fetch(String url) {
-        return fetch(url, null);
+    private String fetchHtml(String url) {
+        return fetchHtml(url, null);
     }
 
-    private String fetch(String url, String referer) {
+    private String fetchHtml(String url, String referer) {
         try {
+            String fullUrl = url.startsWith("http") ? url : (host + url);
             Map<String, String> h = new HashMap<>(getHeaders());
             if (referer != null) h.put("Referer", referer);
-            String body = OkHttp.string(url, h);
+            String body = OkHttp.string(fullUrl, h);
             return body == null ? "" : body;
         } catch (Exception e) {
-            SpiderDebug.log("fetch error: " + e.getMessage());
-            return "";
-        }
-    }
-
-    private String postForm(String url, Map<String, String> data, String referer) {
-        try {
-            Map<String, String> h = new HashMap<>(getHeaders());
-            h.put("Content-Type", "application/x-www-form-urlencoded");
-            h.put("X-Requested-With", "XMLHttpRequest");
-            if (referer != null) h.put("Referer", referer);
-            String body = OkHttp.post(url, data, h).getBody();
-            return body == null ? "" : body;
-        } catch (Exception e) {
-            SpiderDebug.log("postForm error: " + e.getMessage());
+            SpiderDebug.log("fetchHtml error: " + e.getMessage());
             return "";
         }
     }
 
     private String fixUrl(String url) {
         if (url == null || url.isEmpty()) return "";
+        url = url.trim();
         if (url.startsWith("//")) return "https:" + url;
         if (url.startsWith("http")) return url;
         if (url.startsWith("/")) return host + url;
         return host + "/" + url;
+    }
+
+    private String cleanHtml(String text) {
+        if (text == null) return "";
+        return text.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim();
     }
 
     private String group(String regex, String text, int g) {
@@ -117,10 +112,6 @@ public class DuShe extends Spider {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    private boolean isM3u8(String url) {
-        return url != null && url.matches(".*\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?.*)?$");
     }
 
     private String buildResult(int parse, String url, Map<String, String> h) {
@@ -140,34 +131,278 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 列表解析
+    // buildCategoryUrl（和 JS 完全一致）
     // ============================================================
-    private List<JSONObject> extractList(String html) {
+    private String buildCategoryUrl(String tid, HashMap<String, String> extend) {
+        String classVal = extend != null && extend.get("class") != null ? extend.get("class") : "";
+        String storyVal = extend != null && extend.get("story") != null ? extend.get("story") : "";
+        String areaVal  = extend != null && extend.get("area") != null ? extend.get("area") : "";
+        String yearVal  = extend != null && extend.get("year") != null ? extend.get("year") : "";
+        String sortVal  = extend != null && extend.get("sort") != null ? extend.get("sort") : "";
+        int pg = 1;
+        if (extend != null && extend.get("page") != null) {
+            try { pg = Integer.parseInt(extend.get("page")); } catch (Exception ignored) {}
+        }
+
+        String mainType = TextUtils.isEmpty(tid) ? "dianying" : tid;
+
+        if (!TextUtils.isEmpty(classVal)) {
+            String[] validTypes = {
+                "dongzuo", "xiju", "aiqing", "kehuan", "jilu", "zhanzheng",
+                "juqing", "lishi", "fanzui", "kongbu", "qihuan", "donghua",
+                "guochan", "gangju", "zilei10", "hanju", "riju", "taiju", "meiju", "haiwaiju",
+                "dalu", "gangtai", "rihan", "hiwai",
+                "guoman", "riman", "oumei"
+            };
+            for (String t : validTypes) {
+                if (t.equals(classVal)) { mainType = classVal; break; }
+            }
+        }
+
+        StringBuilder url = new StringBuilder("/show/").append(mainType);
+
+        url.append(TextUtils.isEmpty(areaVal) ? "-" : "-" + urlEncode(areaVal));
+        url.append(("time".equals(sortVal) || "hits".equals(sortVal) || "score".equals(sortVal)) ? "-" + sortVal : "-");
+        url.append(TextUtils.isEmpty(storyVal) ? "-" : "-" + urlEncode(storyVal));
+
+        // 补短横到 11 个
+        int dashCount = 0;
+        for (int i = 0; i < url.length(); i++) if (url.charAt(i) == '-') dashCount++;
+        int needDashes = 8 - dashCount;
+        if (needDashes < 0) needDashes = 0;
+        for (int i = 0; i < needDashes; i++) url.append('-');
+
+        if (pg > 1) url.append(pg);
+        url.append("---");
+
+        if (!TextUtils.isEmpty(yearVal)) url.append(yearVal);
+
+        url.append(".html");
+        return url.toString();
+    }
+
+    // ============================================================
+    // extractVodList（和 JS 完全一致）
+    // ============================================================
+    private List<JSONObject> extractVodList(String html) {
         List<JSONObject> list = new ArrayList<>();
         if (html == null || html.isEmpty()) return list;
         try {
-            Matcher cardM = Pattern.compile(
+            Matcher m = Pattern.compile(
                 "<a[^>]*href=\"(/album/\\d+\\.html)\"[^>]*title=\"([^\"]*)\"[^>]*>[\\s\\S]*?" +
-                "<img[^>]*(?:data-original|src)=\"([^\"]+)\"[^>]*>",
+                "<div[^>]*class=\"[^\"]*module-item-note[^\"]*\"[^>]*>([^<]*)</div>[\\s\\S]*?" +
+                "<img[^>]*data-original=\"([^\"]+)\"[^>]*>",
                 Pattern.DOTALL
             ).matcher(html);
-            List<String> seen = new ArrayList<>();
-            while (cardM.find()) {
-                String href = cardM.group(1);
-                if (seen.contains(href)) continue;
-                seen.add(href);
+            Set<String> seen = new LinkedHashSet<>();
+            while (m.find()) {
+                String vid = fixUrl(m.group(1));
+                if (seen.contains(vid)) continue;
+                seen.add(vid);
 
                 JSONObject o = new JSONObject();
-                o.put("vod_id", fixUrl(href));
-                o.put("vod_name", cardM.group(2).trim());
-                o.put("vod_pic", fixUrl(cardM.group(3)));
-                o.put("vod_remarks", "");
+                o.put("vod_id", vid);
+                o.put("vod_name", m.group(2) == null ? "" : m.group(2).trim());
+                o.put("vod_pic", fixUrl(m.group(4)));
+                o.put("vod_remarks", m.group(3) == null ? "" : m.group(3).trim());
+                o.put("vod_actor", "");
                 list.add(o);
             }
         } catch (Exception e) {
-            SpiderDebug.log("extractList error: " + e.getMessage());
+            SpiderDebug.log("extractVodList error: " + e.getMessage());
         }
         return list;
+    }
+
+    // ============================================================
+    // extractTabs
+    // ============================================================
+    private List<String> extractTabs(String html) {
+        List<String> tabs = new ArrayList<>();
+
+        Matcher m = Pattern.compile(
+            "<div[^>]*class=\"[^\"]*module-tab-item[^\"]*\"[^>]*data-dropdown-value=\"([^\"]+)\"[^>]*>"
+        ).matcher(html);
+        while (m.find()) {
+            String name = m.group(1).trim();
+            if (!name.isEmpty() && !tabs.contains(name)) tabs.add(name);
+        }
+
+        if (tabs.isEmpty()) {
+            Matcher m2 = Pattern.compile(
+                "<span[^>]*class=\"[^\"]*module-tab-value[^\"]*\"[^>]*>([^<]+)</span>"
+            ).matcher(html);
+            while (m2.find()) {
+                String name = m2.group(1).trim();
+                if (!name.isEmpty() && !tabs.contains(name)) tabs.add(name);
+            }
+        }
+
+        SpiderDebug.log("提取到线路: " + tabs);
+        return tabs;
+    }
+
+    // ============================================================
+    // extractEpisodes
+    // ============================================================
+    private List<String[]> extractEpisodes(String html) {
+        List<String[]> eps = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        Matcher m = Pattern.compile(
+            "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"(/play/\\d+-\\d+-\\d+\\.html)\"[^>]*>[\\s\\S]*?<span>([^<]+)</span>"
+        ).matcher(html);
+        while (m.find()) {
+            String url = fixUrl(m.group(1));
+            String name = m.group(2).trim();
+            if (name.isEmpty()) name = "第1集";
+            if (!seen.contains(url)) {
+                seen.add(url);
+                eps.add(new String[]{name, url});
+            }
+        }
+
+        if (eps.isEmpty()) {
+            Matcher m2 = Pattern.compile(
+                "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"(/play/\\d+-\\d+-\\d+\\.html)\"[^>]*>([^<]+)</a>"
+            ).matcher(html);
+            while (m2.find()) {
+                String url = fixUrl(m2.group(1));
+                String name = m2.group(2).trim();
+                if (name.isEmpty()) name = "第1集";
+                if (!seen.contains(url)) {
+                    seen.add(url);
+                    eps.add(new String[]{name, url});
+                }
+            }
+        }
+
+        return eps;
+    }
+
+    // ============================================================
+    // extractSids
+    // ============================================================
+    private List<Integer> extractSids(List<String[]> episodes) {
+        TreeSet<Integer> set = new TreeSet<>();
+        for (String[] ep : episodes) {
+            Matcher m = Pattern.compile("/play/\\d+-(\\d+)-\\d+\\.html").matcher(ep[1]);
+            if (m.find()) {
+                try { set.add(Integer.parseInt(m.group(1))); } catch (Exception ignored) {}
+            }
+        }
+        return new ArrayList<>(set);
+    }
+
+    // ============================================================
+    // getVodDetail
+    // ============================================================
+    private JSONObject getVodDetail(String vodId) {
+        try {
+            String url = vodId.startsWith("http") ? vodId : fixUrl(vodId);
+            String html = fetchHtml(url);
+            if (html.isEmpty()) return null;
+
+            JSONObject info = new JSONObject();
+            info.put("vod_id", vodId);
+
+            String name = group("<h1[^>]*>([^<]+)</h1>", html, 1);
+            info.put("vod_name", name.isEmpty() ? "未知影片" : name.trim());
+
+            String pic = group("<div[^>]*class=\"[^\"]*module-item-pic[^\"]*\"[^>]*>\\s*<img[^>]*data-original=\"([^\"]+)\"", html, 1);
+            info.put("vod_pic", pic.isEmpty() ? "" : fixUrl(pic));
+
+            String dir = group("导演：</span>\\s*<div[^>]*class=\"[^\"]*module-info-item-content[^\"]*\"[^>]*>([\\s\\S]*?)</div>", html, 1);
+            info.put("vod_director", cleanHtml(dir));
+
+            String actorBlock = group("主演：</span>\\s*<div[^>]*class=\"[^\"]*module-info-item-content[^\"]*\"[^>]*>([\\s\\S]*?)</div>", html, 1);
+            if (!actorBlock.isEmpty()) {
+                List<String> actorList = new ArrayList<>();
+                Matcher aM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(actorBlock);
+                while (aM.find()) actorList.add(aM.group(1).trim());
+                if (actorList.isEmpty()) actorList.add(cleanHtml(actorBlock));
+                info.put("vod_actor", String.join(",", actorList));
+            } else {
+                info.put("vod_actor", "");
+            }
+
+            String year = group("<a[^>]*title=\"(\\d{4})\"[^>]*>", html, 1);
+            info.put("vod_year", year);
+
+            String area = group("地区：</span>\\s*<div[^>]*class=\"[^\"]*module-info-item-content[^\"]*\"[^>]*>([^<]+)</div>", html, 1);
+            info.put("vod_area", area.trim());
+
+            String remarks = group("更新：</span>\\s*<div[^>]*class=\"[^\"]*module-info-item-content[^\"]*\"[^>]*>([^<]+)</div>", html, 1);
+            info.put("vod_remarks", remarks.trim());
+
+            String content = group("<div[^>]*class=\"[^\"]*module-info-introduction-content[^\"]*\"[^>]*>[\\s\\S]*?<p>([\\s\\S]*?)</p>", html, 1);
+            info.put("vod_content", cleanHtml(content));
+
+            // 线路 + 剧集
+            List<String> tabs = extractTabs(html);
+            List<String[]> episodes = extractEpisodes(html);
+            List<Integer> sids = extractSids(episodes);
+
+            SpiderDebug.log("剧集数: " + episodes.size());
+            SpiderDebug.log("SID列表: " + sids);
+
+            if (!episodes.isEmpty() && !sids.isEmpty()) {
+                List<String> playFrom = new ArrayList<>();
+                List<String> playUrlList = new ArrayList<>();
+
+                for (int i = 0; i < sids.size(); i++) {
+                    int sid = sids.get(i);
+                    List<String> eps = new ArrayList<>();
+                    for (String[] ep : episodes) {
+                        Matcher m = Pattern.compile("/play/\\d+-(\\d+)-\\d+\\.html").matcher(ep[1]);
+                        if (m.find() && Integer.parseInt(m.group(1)) == sid) {
+                            eps.add(ep[0] + "$" + ep[1]);
+                        }
+                    }
+                    if (!eps.isEmpty()) {
+                        playFrom.add(i < tabs.size() ? tabs.get(i) : ("线路" + (i + 1)));
+                        playUrlList.add(String.join("#", eps));
+                    }
+                }
+
+                if (!playFrom.isEmpty()) {
+                    info.put("vod_play_from", String.join("$$$", playFrom));
+                    info.put("vod_play_url", String.join("$$$", playUrlList));
+                    SpiderDebug.log("播放列表: " + playFrom);
+                }
+            }
+
+            // 备用方案
+            if (!info.has("vod_play_from") || info.optString("vod_play_from").isEmpty()) {
+                if (!episodes.isEmpty()) {
+                    Map<Integer, List<String>> sidMap = new LinkedHashMap<>();
+                    for (String[] ep : episodes) {
+                        Matcher m = Pattern.compile("/play/\\d+-(\\d+)-\\d+\\.html").matcher(ep[1]);
+                        if (m.find()) {
+                            int sid = Integer.parseInt(m.group(1));
+                            sidMap.computeIfAbsent(sid, k -> new ArrayList<>()).add(ep[0] + "$" + ep[1]);
+                        }
+                    }
+                    List<Integer> keys = new ArrayList<>(sidMap.keySet());
+                    java.util.Collections.sort(keys);
+                    List<String> pf = new ArrayList<>();
+                    List<String> pu = new ArrayList<>();
+                    for (int i = 0; i < keys.size(); i++) {
+                        pf.add(i < tabs.size() ? tabs.get(i) : ("线路" + (i + 1)));
+                        pu.add(String.join("#", sidMap.get(keys.get(i))));
+                    }
+                    if (!pf.isEmpty()) {
+                        info.put("vod_play_from", String.join("$$$", pf));
+                        info.put("vod_play_url", String.join("$$$", pu));
+                    }
+                }
+            }
+
+            return info;
+        } catch (Exception e) {
+            SpiderDebug.log("getVodDetail error: " + e.getMessage());
+            return null;
+        }
     }
 
     // ============================================================
@@ -177,13 +412,13 @@ public class DuShe extends Spider {
     public String homeContent(boolean filter) {
         try {
             JSONObject result = new JSONObject();
+
             JSONArray classes = new JSONArray();
-            // 毒舌分类 slug
-            String[][] cfg = {
+            String[][] cls = {
                 {"dianying", "电影"}, {"dianshiju", "电视剧"},
                 {"zongyi", "综艺"}, {"dongman", "动漫"}
             };
-            for (String[] c : cfg) {
+            for (String[] c : cls) {
                 JSONObject o = new JSONObject();
                 o.put("type_id", c[0]);
                 o.put("type_name", c[1]);
@@ -198,95 +433,164 @@ public class DuShe extends Spider {
         }
     }
 
+    // ============================================================
+    // buildFilters
+    // ============================================================
     private JSONObject buildFilters() throws Exception {
         JSONObject filters = new JSONObject();
-
-        String[][] areaValues = {
-            {"", "全部"}, {"中国大陆", "中国大陆"}, {"中国香港", "中国香港"},
-            {"中国台湾", "中国台湾"}, {"美国", "美国"}, {"日本", "日本"},
-            {"韩国", "韩国"}, {"泰国", "泰国"}, {"英国", "英国"},
-            {"法国", "法国"}, {"德国", "德国"}, {"其它", "其它"}
-        };
-
-        JSONArray yearValues = new JSONArray();
-        JSONObject y0 = new JSONObject(); y0.put("v", ""); y0.put("n", "全部"); yearValues.put(y0);
-        for (int y = 2026; y >= 2000; y--) {
-            JSONObject o = new JSONObject();
-            o.put("v", String.valueOf(y));
-            o.put("n", String.valueOf(y));
-            yearValues.put(o);
+        String[] cats = {"dianying", "dianshiju", "zongyi", "dongman"};
+        for (String cat : cats) {
+            JSONArray arr = new JSONArray();
+            arr.put(filterGroup("class", "类型", TYPE_FILTERS(cat)));
+            arr.put(filterGroup("story", "剧情", STORY_FILTERS(cat)));
+            arr.put(filterGroup("area",  "地区", AREA_FILTERS(cat)));
+            arr.put(filterGroup("year",  "年份", YEAR_FILTERS()));
+            arr.put(filterGroup("sort",  "排序", SORT_FILTERS()));
+            filters.put(cat, arr);
         }
-
-        String[][] sortValues = {
-            {"", "默认"}, {"time", "按最新"}, {"hits", "按最热"}, {"score", "按评分"}
-        };
-
-        filters.put("dianying", buildFilterArray(
-            filterGroup("class", "类型", new String[][]{
-                {"", "全部"}, {"动作", "动作"}, {"喜剧", "喜剧"}, {"爱情", "爱情"},
-                {"科幻", "科幻"}, {"恐怖", "恐怖"}, {"剧情", "剧情"}, {"战争", "战争"},
-                {"犯罪", "犯罪"}, {"动画", "动画"}, {"奇幻", "奇幻"}, {"武侠", "武侠"},
-                {"悬疑", "悬疑"}, {"惊悚", "惊悚"}, {"古装", "古装"}
-            }),
-            filterGroup("area", "地区", areaValues),
-            filterGroup("year", "年份", yearValues),
-            filterGroup("by", "排序", sortValues)
-        ));
-
-        filters.put("dianshiju", buildFilterArray(
-            filterGroup("class", "类型", new String[][]{
-                {"", "全部"}, {"古装", "古装"}, {"战争", "战争"}, {"喜剧", "喜剧"},
-                {"家庭", "家庭"}, {"犯罪", "犯罪"}, {"动作", "动作"}, {"奇幻", "奇幻"},
-                {"剧情", "剧情"}, {"历史", "历史"}, {"网剧", "网剧"}
-            }),
-            filterGroup("area", "地区", areaValues),
-            filterGroup("year", "年份", yearValues),
-            filterGroup("by", "排序", sortValues)
-        ));
-
-        filters.put("zongyi", buildFilterArray(
-            filterGroup("class", "类型", new String[][]{
-                {"", "全部"}, {"选秀", "选秀"}, {"情感", "情感"}, {"访谈", "访谈"},
-                {"旅游", "旅游"}, {"音乐", "音乐"}, {"美食", "美食"}, {"生活", "生活"}
-            }),
-            filterGroup("area", "地区", areaValues),
-            filterGroup("year", "年份", yearValues),
-            filterGroup("by", "排序", sortValues)
-        ));
-
-        filters.put("dongman", buildFilterArray(
-            filterGroup("class", "类型", new String[][]{
-                {"", "全部"}, {"情感", "情感"}, {"科幻", "科幻"}, {"热血", "热血"},
-                {"搞笑", "搞笑"}, {"冒险", "冒险"}, {"动作", "动作"}, {"亲子", "亲子"},
-                {"励志", "励志"}
-            }),
-            filterGroup("area", "地区", areaValues),
-            filterGroup("year", "年份", yearValues),
-            filterGroup("by", "排序", sortValues)
-        ));
-
         return filters;
     }
 
-    private JSONArray buildFilterArray(JSONObject... items) {
+    private JSONArray TYPE_FILTERS(String cat) throws Exception {
+        String[][] dy = {
+            {"", "全部"}, {"dongzuo", "动作"}, {"xiju", "喜剧"}, {"aiqing", "爱情"},
+            {"kehuan", "科幻"}, {"jilu", "纪录传记"}, {"zhanzheng", "战争灾难"},
+            {"juqing", "家庭剧情"}, {"lishi", "古装历史"}, {"fanzui", "犯罪悬疑"},
+            {"kongbu", "惊悚恐怖"}, {"qihuan", "奇幻冒险"}, {"donghua", "动画影院"}
+        };
+        String[][] ds = {
+            {"", "全部"}, {"guochan", "国产"}, {"gangju", "港剧"}, {"zilei10", "台剧"},
+            {"hanju", "韩剧"}, {"riju", "日剧"}, {"taiju", "泰剧"}, {"meiju", "欧美"},
+            {"haiwaiju", "海外"}
+        };
+        String[][] zy = {
+            {"", "全部"}, {"dalu", "大陆"}, {"gangtai", "港台"}, {"rihan", "日韩"}, {"hiwai", "海外"}
+        };
+        String[][] dm = {
+            {"", "全部"}, {"guoman", "国漫"}, {"riman", "日漫"}, {"oumei", "欧美"}
+        };
+        String[][] data;
+        if ("dianying".equals(cat)) data = dy;
+        else if ("dianshiju".equals(cat)) data = ds;
+        else if ("zongyi".equals(cat)) data = zy;
+        else data = dm;
+
         JSONArray arr = new JSONArray();
-        for (JSONObject o : items) arr.put(o);
+        for (String[] kv : data) {
+            JSONObject o = new JSONObject();
+            o.put("v", kv[0]);
+            o.put("n", kv[1]);
+            arr.put(o);
+        }
         return arr;
     }
 
-    private JSONObject filterGroup(String key, String name, String[][] values) throws Exception {
+    private JSONArray STORY_FILTERS(String cat) throws Exception {
+        String[][] dy = {
+            {"", "全部"}, {"喜剧", "喜剧"}, {"爱情", "爱情"}, {"恐怖", "恐怖"},
+            {"动作", "动作"}, {"科幻", "科幻"}, {"剧情", "剧情"}, {"战争", "战争"},
+            {"警匪", "警匪"}, {"犯罪", "犯罪"}, {"动画", "动画"}, {"奇幻", "奇幻"},
+            {"武侠", "武侠"}, {"冒险", "冒险"}, {"枪战", "枪战"}, {"悬疑", "悬疑"},
+            {"惊悚", "惊悚"}, {"经典", "经典"}, {"青春", "青春"}, {"文艺", "文艺"},
+            {"微电影", "微电影"}, {"古装", "古装"}, {"历史", "历史"}, {"运动", "运动"},
+            {"农村", "农村"}, {"儿童", "儿童"}, {"网络电影", "网络电影"}
+        };
+        String[][] ds = {
+            {"", "全部"}, {"古装", "古装"}, {"战争", "战争"}, {"青春偶像", "青春偶像"},
+            {"喜剧", "喜剧"}, {"家庭", "家庭"}, {"犯罪", "犯罪"}, {"动作", "动作"},
+            {"奇幻", "奇幻"}, {"剧情", "剧情"}, {"历史", "历史"}, {"经典", "经典"},
+            {"乡村", "乡村"}, {"情景", "情景"}, {"商战", "商战"}, {"网剧", "网剧"}
+        };
+        String[][] zy = {
+            {"", "全部"}, {"情感", "情感"}, {"科幻", "科幻"}, {"热血", "热血"},
+            {"推理", "推理"}, {"搞笑", "搞笑"}, {"冒险", "冒险"}, {"萝莉", "萝莉"},
+            {"校园", "校园"}, {"动作", "动作"}, {"机战", "机战"}, {"运动", "运动"},
+            {"战争", "战争"}, {"少年", "少年"}, {"少女", "少女"}, {"社会", "社会"},
+            {"原创", "原创"}, {"亲子", "亲子"}, {"益智", "益智"}, {"励志", "励志"},
+            {"其他", "其他"}
+        };
+        String[][] dm = {
+            {"", "全部"}, {"选秀", "选秀"}, {"情感", "情感"}, {"访谈", "访谈"},
+            {"播报", "播报"}, {"旅游", "旅游"}, {"音乐", "音乐"}, {"美食", "美食"},
+            {"纪实", "纪实"}, {"曲艺", "曲艺"}, {"生活", "生活"}, {"游戏互动", "游戏互动"},
+            {"财经", "财经"}, {"求职", "求职"}
+        };
+        String[][] data;
+        if ("dianying".equals(cat)) data = dy;
+        else if ("dianshiju".equals(cat)) data = ds;
+        else if ("zongyi".equals(cat)) data = zy;
+        else data = dm;
+
         JSONArray arr = new JSONArray();
-        for (String[] v : values) {
+        for (String[] kv : data) {
             JSONObject o = new JSONObject();
-            o.put("n", v[1]);
-            o.put("v", v[0]);
+            o.put("v", kv[0]);
+            o.put("n", kv[1]);
             arr.put(o);
         }
-        JSONObject obj = new JSONObject();
-        obj.put("key", key);
-        obj.put("name", name);
-        obj.put("value", arr);
-        return obj;
+        return arr;
+    }
+
+    private JSONArray AREA_FILTERS(String cat) throws Exception {
+        String[][] dy = {
+            {"", "全部"}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
+            {"美国", "美国"}, {"法国", "法国"}, {"英国", "英国"}, {"日本", "日本"},
+            {"韩国", "韩国"}, {"德国", "德国"}, {"泰国", "泰国"}, {"印度", "印度"},
+            {"意大利", "意大利"}, {"西班牙", "西班牙"}, {"加拿大", "加拿大"}, {"其他", "其他"}
+        };
+        String[][] ds = {
+            {"", "全部"}, {"中国大陆", "中国大陆"}, {"中国香港", "中国香港"},
+            {"中国台湾", "中国台湾"}, {"美国", "美国"}, {"韩国", "韩国"}, {"日本", "日本"},
+            {"泰国", "泰国"}, {"新加坡", "新加坡"}, {"德国", "德国"}, {"马来西亚", "马来西亚"},
+            {"印度", "印度"}, {"英国", "英国"}, {"法国", "法国"}, {"加拿大", "加拿大"},
+            {"西班牙", "西班牙"}, {"俄罗斯", "俄罗斯"}, {"其它", "其它"}
+        };
+        String[][] zy = {
+            {"", "全部"}, {"国产", "国产"}, {"日本", "日本"}, {"欧美", "欧美"}, {"其他", "其他"}
+        };
+        String[][] dm = {
+            {"", "全部"}, {"内地", "内地"}, {"港台", "港台"}, {"日韩", "日韩"}, {"欧美", "欧美"}
+        };
+        String[][] data;
+        if ("dianying".equals(cat)) data = dy;
+        else if ("dianshiju".equals(cat)) data = ds;
+        else if ("zongyi".equals(cat)) data = zy;
+        else data = dm;
+
+        JSONArray arr = new JSONArray();
+        for (String[] kv : data) {
+            JSONObject o = new JSONObject();
+            o.put("v", kv[0]);
+            o.put("n", kv[1]);
+            arr.put(o);
+        }
+        return arr;
+    }
+
+    private JSONArray YEAR_FILTERS() throws Exception {
+        String[] years = {"", "2027", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018"};
+        JSONArray arr = new JSONArray();
+        for (String y : years) {
+            JSONObject o = new JSONObject();
+            o.put("v", y);
+            o.put("n", y.isEmpty() ? "全部" : y);
+            arr.put(o);
+        }
+        return arr;
+    }
+
+    private JSONArray SORT_FILTERS() throws Exception {
+        String[][] data = {
+            {"", "默认"}, {"time", "时间排序"}, {"hits", "人气排序"}, {"score", "评分排序"}
+        };
+        JSONArray arr = new JSONArray();
+        for (String[] kv : data) {
+            JSONObject o = new JSONObject();
+            o.put("v", kv[0]);
+            o.put("n", kv[1]);
+            arr.put(o);
+        }
+        return arr;
     }
 
     private JSONObject filterGroup(String key, String name, JSONArray values) throws Exception {
@@ -303,8 +607,8 @@ public class DuShe extends Spider {
     @Override
     public String homeVideoContent() {
         try {
-            String html = fetch(host + "/");
-            List<JSONObject> list = extractList(html);
+            String html = fetchHtml(host + "/");
+            List<JSONObject> list = extractVodList(html);
             if (list.size() > 12) list = list.subList(0, 12);
             JSONArray arr = new JSONArray();
             for (JSONObject o : list) arr.put(o);
@@ -323,45 +627,29 @@ public class DuShe extends Spider {
     public String categoryContent(String tid, String pg, boolean filter,
                                   HashMap<String, String> extend) {
         try {
-            int page = 1;
-            try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
+            HashMap<String, String> ext = extend == null ? new HashMap<>() : new HashMap<>(extend);
+            ext.put("page", String.valueOf(Integer.parseInt(pg)));
 
-            String cls  = extend != null && extend.get("class") != null ? extend.get("class") : "";
-            String area = extend != null && extend.get("area") != null ? extend.get("area") : "";
-            String year = extend != null && extend.get("year") != null ? extend.get("year") : "";
-            String by   = extend != null && extend.get("by") != null ? extend.get("by") : "";
+            String urlPath = buildCategoryUrl(tid, ext);
+            String url = host + urlPath;
+            SpiderDebug.log("category URL: " + url);
 
-            // 毒舌 URL：/show/{tid}-{area}-{by}-{class}--------{year}.html
-            // 先做基础版：/show/{tid}-----------.html + 分页
-            // 有筛选时用 /show/{tid}-{area}-{by}-{class}--------{year}.html 之类
-            String url;
-            if (cls.isEmpty() && area.isEmpty() && year.isEmpty() && by.isEmpty()) {
-                // 无筛选
-                url = host + "/show/" + tid + "-----------";
-                if (page > 1) url += page;
-                url += ".html";
-            } else {
-                // 有筛选：/show/{tid}-{area}-{by}-{class}--------{year}-{page}.html
-                StringBuilder sb = new StringBuilder(host);
-                sb.append("/show/").append(tid);
-                sb.append("-").append(area);
-                sb.append("-").append(by);
-                sb.append("-").append(cls);
-                sb.append("--------").append(year);
-                sb.append("--------");  // 补齐
-                if (page > 1) sb.append(page);
-                sb.append(".html");
-                url = sb.toString();
-            }
-
-            SpiderDebug.log("category url: " + url);
-
-            String html = fetch(url);
-            List<JSONObject> list = extractList(html);
-            int pagecount = extractPageCount(html, page, list.size());
-
+            String html = fetchHtml(url);
+            List<JSONObject> list = extractVodList(html);
             SpiderDebug.log("category list size: " + list.size());
 
+            int pagecount = 1;
+            Matcher m = Pattern.compile("<a[^>]*href=\"[^\"]*---(\\d+)---[^\"]*\"[^>]*>(\\d+)</a>").matcher(html);
+            int maxPage = 1;
+            while (m.find()) {
+                try {
+                    int n = Integer.parseInt(m.group(1));
+                    if (n > maxPage) maxPage = n;
+                } catch (Exception ignored) {}
+            }
+            if (maxPage > 1) pagecount = maxPage;
+
+            int page = Integer.parseInt(pg);
             JSONArray arr = new JSONArray();
             for (JSONObject o : list) arr.put(o);
 
@@ -369,32 +657,13 @@ public class DuShe extends Spider {
             result.put("page", page);
             result.put("list", arr);
             result.put("pagecount", pagecount);
-            result.put("limit", 24);
-            result.put("total", pagecount * 24);
+            result.put("limit", 40);
+            result.put("total", pagecount * 40);
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log("categoryContent error: " + e.getMessage());
             return "";
         }
-    }
-
-    private int extractPageCount(String html, int page, int listSize) {
-        int pagecount = page;
-        try {
-            // 找 "共 N 页"
-            String total = group("共\\s*(\\d+)\\s*页", html, 1);
-            if (!total.isEmpty()) {
-                try { return Integer.parseInt(total); } catch (Exception ignored) {}
-            }
-            // 找尾页
-            Matcher m = Pattern.compile("<a[^>]*href=\"[^\"]*-----(\\d+)---[^\"]*\"[^>]*>尾页</a>").matcher(html);
-            if (m.find()) {
-                try { return Integer.parseInt(m.group(1)); } catch (Exception ignored) {}
-            }
-            // 兜底：列表 >= 10 认为有下一页
-            if (listSize >= 10) pagecount = page + 1;
-        } catch (Exception ignored) {}
-        return pagecount;
     }
 
     // ============================================================
@@ -404,154 +673,27 @@ public class DuShe extends Spider {
     public String detailContent(List<String> ids) {
         try {
             String id = ids.get(0);
-            String url = id.startsWith("http") ? id : (host + id);
-            String html = fetch(url);
-            if (html.isEmpty()) {
+            JSONObject info = getVodDetail(id);
+            if (info == null) {
                 JSONObject r = new JSONObject();
-                r.put("list", new JSONArray());
+                JSONArray arr = new JSONArray();
+                JSONObject item = new JSONObject();
+                item.put("vod_id", id);
+                item.put("vod_name", "获取失败");
+                item.put("vod_play_url", "");
+                arr.put(item);
+                r.put("list", arr);
                 return r.toString();
             }
-
-            JSONObject info = new JSONObject();
-            info.put("vod_id", id);
-
-            // ★ 片名
-            String name = group("<h1>([^<]+)</h1>", html, 1);
-            info.put("vod_name", name.trim());
-
-            // ★ 封面
-            String pic = group("<img[^>]*class=\"[^\"]*lazyload[^\"]*\"[^>]*data-original=\"([^\"]+)\"", html, 1);
-            info.put("vod_pic", fixUrl(pic));
-
-            // ★ 简介
-            String content = group(
-                "<div[^>]*class=\"module-info-introduction-content\"[^>]*>[\\s\\S]*?<p>([\\s\\S]*?)</p>",
-                html, 1
-            );
-            content = content.replaceAll("<[^>]+>", "").replace("　", " ").trim();
-            info.put("vod_content", content);
-
-            // ★ 年份
-            String year = group(
-                "<div[^>]*class=\"module-info-tag-link\"[^>]*>[\\s\\S]*?<a[^>]*title=\"(\\d{4})\"",
-                html, 1
-            );
-            info.put("vod_year", year);
-
-            // ★ 地区
-            String area = "";
-            Matcher areaM = Pattern.compile(
-                "<a[^>]*title=\"([^\"]*(?:中国大陆|中国香港|中国台湾|美国|日本|韩国|泰国|英国|法国|德国|印度|加拿大|澳大利亚)[^\"]*)\""
-            ).matcher(html);
-            if (areaM.find()) area = areaM.group(1).trim();
-            info.put("vod_area", area);
-
-            // ★ 类型
-            List<String> typeList = new ArrayList<>();
-            Matcher tagM = Pattern.compile(
-                "<div[^>]*class=\"module-info-tag-link\"[^>]*>[\\s\\S]*?</div>",
-                Pattern.DOTALL
-            ).matcher(html);
-            while (tagM.find()) {
-                String block = tagM.group(0);
-                Matcher aM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(block);
-                while (aM.find()) {
-                    String t = aM.group(1).trim();
-                    if (t.matches("\\d+")) continue;
-                    if (t.contains("中国") || t.contains("美国") || t.contains("日本")
-                        || t.contains("韩国") || t.contains("香港") || t.contains("台湾")
-                        || t.contains("英国") || t.contains("法国") || t.contains("德国")) continue;
-                    if (!typeList.contains(t)) typeList.add(t);
-                }
-            }
-            info.put("vod_class", String.join(",", typeList));
-
-            // ★ 导演
-            String dirBlock = group(
-                "<span[^>]*class=\"module-info-item-title\"[^>]*>导演：</span>[\\s\\S]*?<div[^>]*class=\"module-info-item-content\"[^>]*>([\\s\\S]*?)</div>",
-                html, 1
-            );
-            List<String> dirs = new ArrayList<>();
-            Matcher dM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(dirBlock);
-            while (dM.find()) dirs.add(dM.group(1).trim());
-            info.put("vod_director", String.join("/", dirs));
-
-            // ★ 主演
-            String actorBlock = group(
-                "<span[^>]*class=\"module-info-item-title\"[^>]*>主演：</span>[\\s\\S]*?<div[^>]*class=\"module-info-item-content\"[^>]*>([\\s\\S]*?)</div>",
-                html, 1
-            );
-            List<String> actors = new ArrayList<>();
-            Matcher aM2 = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(actorBlock);
-            while (aM2.find()) actors.add(aM2.group(1).trim());
-            info.put("vod_actor", String.join("/", actors));
-
-            // ★ 播放列表（方案 B：用 data-dropdown-value 抠中文名）
-            String[] pl = extractPlaylist(html);
-            info.put("vod_play_from", pl[0]);
-            info.put("vod_play_url", pl[1]);
-
-            SpiderDebug.log("detail: name=" + name);
-            SpiderDebug.log("detail: from=" + pl[0]);
-
             JSONArray list = new JSONArray();
             list.put(info);
-            JSONObject result = new JSONObject();
-            result.put("list", list);
-            return result.toString();
+            JSONObject r = new JSONObject();
+            r.put("list", list);
+            return r.toString();
         } catch (Exception e) {
             SpiderDebug.log("detailContent error: " + e.getMessage());
             return "";
         }
-    }
-
-    // ============================================================
-    // ★ extractPlaylist（方案 B）
-    // ============================================================
-    private String[] extractPlaylist(String html) {
-        List<String> playFrom = new ArrayList<>();
-        List<String> playUrl = new ArrayList<>();
-
-        // 1. 抠线路名（data-dropdown-value）
-        List<String> names = new ArrayList<>();
-        Matcher tabM = Pattern.compile(
-            "<div[^>]*class=\"module-tab-item tab-item[^\"]*\"[^>]*data-dropdown-value=\"([^\"]+)\"",
-            Pattern.DOTALL
-        ).matcher(html);
-        while (tabM.find()) {
-            String name = tabM.group(1).trim();
-            if (!name.isEmpty() && !names.contains(name)) names.add(name);
-        }
-        SpiderDebug.log("detail: lineNames = " + names);
-
-        // 2. 抠剧集块
-        Matcher blockM = Pattern.compile(
-            "<div[^>]*class=\"module-play-list-content[^\"]*\"[^>]*>([\\s\\S]*?)</div>",
-            Pattern.DOTALL
-        ).matcher(html);
-
-        int idx = 0;
-        while (blockM.find()) {
-            String block = blockM.group(1);
-            List<String> eps = new ArrayList<>();
-            Matcher aM = Pattern.compile(
-                "<a[^>]*class=\"module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>[\\s\\S]*?<span>([^<]+)</span>",
-                Pattern.DOTALL
-            ).matcher(block);
-            while (aM.find()) {
-                String href = aM.group(1);
-                String text = aM.group(2).trim();
-                eps.add(text + "$" + fixUrl(href));
-            }
-            if (!eps.isEmpty()) {
-                String fromName = idx < names.size() ? names.get(idx) : ("线路" + (idx + 1));
-                playFrom.add(fromName);
-                playUrl.add(String.join("#", eps));
-                idx++;
-            }
-        }
-
-        return new String[]{String.join("$$$", playFrom), String.join("$$$", playUrl)};
     }
 
     // ============================================================
@@ -565,16 +707,15 @@ public class DuShe extends Spider {
     @Override
     public String searchContent(String wd, boolean quick, String pg) {
         try {
-            int page = 1;
-            try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
+            int page = Integer.parseInt(pg);
             String url = host + "/search/" + urlEncode(wd) + "-------------.html";
-            if (page > 1) url += "?page=" + page;
-            String html = fetch(url);
-            List<JSONObject> list = extractList(html);
+            SpiderDebug.log("search URL: " + url);
+
+            String html = fetchHtml(url);
+            List<JSONObject> list = extractVodList(html);
 
             JSONArray arr = new JSONArray();
             for (JSONObject o : list) arr.put(o);
-
             JSONObject result = new JSONObject();
             result.put("list", arr);
             result.put("page", page);
@@ -587,117 +728,27 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（全部返回 parse:0 + m3u8）
+    // ★ playerContent（走 v.dushe.online → 全部 parse:0 + m3u8）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
             // ① 入参直链
-            if (isM3u8(id)) {
+            if (id != null && id.matches(".*\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?.*)?$")) {
                 return buildResult(0, id, getM3u8Headers());
             }
 
             // ② 抓播放页
-            String pageUrl = id.startsWith("http") ? id : (host + id);
-            String html = fetch(pageUrl);
+            String pageUrl = id.startsWith("http") ? id : fixUrl(id);
+            String html = fetchHtml(pageUrl);
             if (html.isEmpty()) {
-                return buildResult(1, pageUrl, null);
+                return buildResult(0, "", null);
             }
 
             // ③ 抠 player_aaaa
+            String realUrl = "";
+            String from = "";
             String pJson = group("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})", html, 1);
-            if (pJson.isEmpty()) {
-                return buildResult(1, pageUrl, null);
-            }
-
-            JSONObject pdata;
-            try {
-                pdata = new JSONObject(pJson);
-            } catch (Exception e) {
+            if (!pJson.isEmpty()) {
                 try {
-                    String fixed = pJson.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":")
-                                       .replaceAll(":\\s*'([^']*)'", ":\"$1\"")
-                                       .replaceAll(",\\s*}", "}");
-                    pdata = new JSONObject(fixed);
-                } catch (Exception e2) {
-                    SpiderDebug.log("player_aaaa parse error: " + e2.getMessage());
-                    return buildResult(1, pageUrl, null);
-                }
-            }
-
-            String realUrl = pdata.optString("url", "");
-            String from = pdata.optString("from", "");
-
-            SpiderDebug.log("player.url = " + realUrl);
-            SpiderDebug.log("player.from = " + from);
-
-            // ④ 直链 m3u8/mp4 → parse:0
-            if (isM3u8(realUrl)) {
-                SpiderDebug.log("✅ 直链: " + realUrl);
-                return buildResult(0, realUrl, getM3u8Headers());
-            }
-
-            // ⑤ 第三方 → v.dushe.online 解析
-            if (!realUrl.isEmpty()) {
-                // 5a. GET v.dushe.online
-                String jxUrl = JX_HOST + "/?url=" + urlEncode(realUrl)
-                             + "&t=" + urlEncode(from) + "&d=v2";
-                SpiderDebug.log("→ v.dushe.online: " + jxUrl);
-
-                String jxHtml = fetch(jxUrl, pageUrl);
-                if (jxHtml.isEmpty()) {
-                    SpiderDebug.log("❌ v.dushe.online 空响应");
-                    return buildResult(1, pageUrl, null);
-                }
-
-                // 5b. 抠 config.url
-                String configUrl = group("\"url\"\\s*:\\s*\"([^\"]+)\"", jxHtml, 1);
-                if (configUrl.isEmpty()) {
-                    SpiderDebug.log("❌ 没抠到 config.url");
-                    return buildResult(1, pageUrl, null);
-                }
-                SpiderDebug.log("config.url = " + configUrl);
-
-                // 5c. POST api.php
-                LinkedHashMap<String, String> postData = new LinkedHashMap<>();
-                postData.put("url", configUrl);
-                postData.put("time", "");
-                postData.put("key", "");
-                postData.put("token", "");
-
-                String apiUrl = JX_HOST + "/api.php";
-                String resp = postForm(apiUrl, postData, jxUrl);
-                if (resp.isEmpty()) {
-                    SpiderDebug.log("❌ api.php 空响应");
-                    return buildResult(1, pageUrl, null);
-                }
-                SpiderDebug.log("api resp: " + (resp.length() > 300 ? resp.substring(0, 300) : resp));
-
-                // 5d. 解析 JSON
-                try {
-                    JSONObject j = new JSONObject(resp);
-                    if (j.optInt("code", 0) == 200 && j.has("url")) {
-                        String m3u8 = j.optString("url").replace("\\/", "/");
-                        SpiderDebug.log("✅✅ 解析成功: " + m3u8);
-                        return buildResult(0, m3u8, getM3u8Headers());
-                    }
-                    SpiderDebug.log("❌ api code != 200");
-                } catch (Exception e) {
-                    SpiderDebug.log("❌ JSON error: " + e.getMessage());
-                }
-            }
-
-            // ⑥ 兜底
-            SpiderDebug.log("❌ 全部失败，兜底嗅探");
-            return buildResult(1, pageUrl, null);
-        } catch (Exception e) {
-            SpiderDebug.log("playerContent error: " + e.getMessage());
-            return "";
-        }
-    }
-
-    @Override
-    public void destroy() {
-        SpiderDebug.log("DuShe destroy");
-    }
-}
+                    JSONObject pdata = new JSONObject(pJ
