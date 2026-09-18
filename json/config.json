@@ -32,6 +32,15 @@
   ],
   "sites": [
     {
+      "key": "mtyy",
+      "name": "Mtyy",
+      "type": 3,
+      "api": "csp_Mtyy",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "nm",
       "name": "Nm",
       "type": 3,
