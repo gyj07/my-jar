@@ -749,6 +749,99 @@ public class DuShe extends Spider {
             String realUrl = "";
             String from = "";
             String pJson = group("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})", html, 1);
-            if (!pJson.isEmpty()) {
+                        if (!pJson.isEmpty()) {
                 try {
-                    JSONObject pdata = new JSONObject(pJ
+                    JSONObject pdata = new JSONObject(pJson);
+                    realUrl = pdata.optString("url", "").replace("\\/", "/");
+                    if (realUrl.startsWith("//")) realUrl = "https:" + realUrl;
+                    from = pdata.optString("from", "");
+                } catch (Exception e) {
+                    SpiderDebug.log("player_aaaa parse error: " + e.getMessage());
+                }
+            }
+
+            SpiderDebug.log("player.url = " + realUrl);
+            SpiderDebug.log("player.from = " + from);
+
+            // ④ 直链 m3u8/mp4 → parse:0
+            if (!realUrl.isEmpty() && realUrl.matches(".*\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?.*)?$")) {
+                SpiderDebug.log("✅ 直链: " + realUrl);
+                return buildResult(0, realUrl, getM3u8Headers());
+            }
+
+            // ⑤ 第三方（youku/ivdy 等）→ v.dushe.online 解析
+            if (!realUrl.isEmpty()) {
+                // 5a. GET v.dushe.online
+                String jxUrl = PROXY_HOST + "/?url=" + urlEncode(realUrl)
+                             + "&t=" + urlEncode(from) + "&d=v2";
+                SpiderDebug.log("→ v.dushe.online: " + jxUrl);
+
+                String jxHtml = fetchHtml(jxUrl);
+                if (jxHtml.isEmpty()) {
+                    SpiderDebug.log("❌ v.dushe.online 空响应");
+                    return buildResult(0, "", null);
+                }
+
+                // 5b. 抠 config.url
+                String configUrl = group("\"url\"\\s*:\\s*\"([^\"]+)\"", jxHtml, 1);
+                if (configUrl.isEmpty()) {
+                    SpiderDebug.log("❌ 没抠到 config.url");
+                    return buildResult(0, "", null);
+                }
+                SpiderDebug.log("config.url = " + configUrl);
+
+                // 5c. POST api.php
+                String apiUrl = PROXY_HOST + "/api.php";
+                LinkedHashMap<String, String> postData = new LinkedHashMap<>();
+                postData.put("url", configUrl);
+                postData.put("time", "");
+                postData.put("key", "");
+                postData.put("token", "");
+
+                Map<String, String> h = new HashMap<>();
+                h.put("User-Agent", UA);
+                h.put("Content-Type", "application/x-www-form-urlencoded");
+                h.put("X-Requested-With", "XMLHttpRequest");
+                h.put("Referer", jxUrl);
+
+                String apiResp = "";
+                try {
+                    apiResp = OkHttp.post(apiUrl, postData, h).getBody();
+                } catch (Exception e) {
+                    SpiderDebug.log("❌ POST api.php error: " + e.getMessage());
+                }
+
+                if (apiResp == null || apiResp.isEmpty()) {
+                    SpiderDebug.log("❌ api.php 空响应");
+                    return buildResult(0, "", null);
+                }
+                SpiderDebug.log("api resp: " + (apiResp.length() > 300 ? apiResp.substring(0, 300) : apiResp));
+
+                // 5d. 解析 JSON
+                try {
+                    JSONObject j = new JSONObject(apiResp);
+                    if (j.optInt("code", 0) == 200 && j.has("url")) {
+                        String m3u8 = j.optString("url").replace("\\/", "/");
+                        SpiderDebug.log("✅✅ 解析成功: " + m3u8);
+                        return buildResult(0, m3u8, getM3u8Headers());
+                    }
+                    SpiderDebug.log("❌ api code != 200");
+                } catch (Exception e) {
+                    SpiderDebug.log("❌ JSON error: " + e.getMessage());
+                }
+            }
+
+            // ⑥ 兜底
+            SpiderDebug.log("❌ 全部失败");
+            return buildResult(0, "", null);
+        } catch (Exception e) {
+            SpiderDebug.log("playerContent error: " + e.getMessage());
+            return "";
+        }
+    }
+
+    @Override
+    public void destroy() {
+        SpiderDebug.log("DuShe destroy");
+    }
+}
