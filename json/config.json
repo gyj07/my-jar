@@ -32,6 +32,24 @@
   ],
   "sites": [
     {
+      "key": "douban",
+      "name": "Douban",
+      "type": 3,
+      "api": "csp_Douban",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
+      "key": "nsvod",
+      "name": "NsVod",
+      "type": 3,
+      "api": "csp_NsVod",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "dushe",
       "name": "DuShe",
       "type": 3,
