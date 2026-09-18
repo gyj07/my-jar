@@ -34,6 +34,7 @@ public class SaoHuo extends Spider {
     public void init(Context context, String extend) {
         if (!TextUtils.isEmpty(extend)) {
             host = extend.trim();
+            if (host.endsWith("/")) host = host.substring(0, host.length() - 1);
         }
         headers = new HashMap<>();
         headers.put("User-Agent", UA);
@@ -71,8 +72,6 @@ public class SaoHuo extends Spider {
             h.put("Content-Type", "application/json");
             if (referer != null) h.put("Referer", referer);
 
-            // 你的 OkHttp 没有 postJson，用 OkHttp.post(url, json, header) 或自己拼
-            // 这里假设 OkHttp 有 post(url, String body, Map header)
             String body = OkHttp.post(url, obj.toString(), h).getBody();
             return body == null ? "" : body;
         } catch (Exception e) {
@@ -220,7 +219,7 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // detail
+    // ★ detail（按 QPython 测试结果修正）
     // ============================================================
     @Override
     public String detailContent(List<String> ids) {
@@ -238,49 +237,50 @@ public class SaoHuo extends Spider {
             JSONObject info = new JSONObject();
             info.put("vod_id", id);
 
-            String name = group("<h1[^>]*class=\"v_title[^\"]*\"[^>]*>([^<]+)</h1>", html, 1);
+            // ★ 片名：<h1 class="v_title"><a>片名</a></h1>
+            String name = group("<h1[^>]*class=\"v_title\"[^>]*>[\\s\\S]*?<a[^>]*>([^<]+)</a>", html, 1);
             if (name.isEmpty()) {
-                name = group("<h1[^>]*class=\"title[^\"]*\"[^>]*>([^<]+)</h1>", html, 1);
+                name = group("<h1[^>]*class=\"title\"[^>]*>([^<]+)</h1>", html, 1);
             }
-            name = name.replaceAll("\\s*-.*$", "").trim();
-            info.put("vod_name", name);
+            info.put("vod_name", name.trim());
 
-            String pic = group("<img[^>]*class=\"lazyload\"[^>]*data-original=\"([^\"]+)\"", html, 1);
+            // ★ 封面：优先 .m_background 的 style
+            String pic = group("class=\"m_background\"[^>]*style=\"background-image:url\\(([^)]+)\\)", html, 1);
+            pic = pic.replace("\"", "").replace("'", "").trim();
             if (pic.isEmpty()) {
-                pic = group("<img[^>]*class=\"lazyload\"[^>]*src=\"([^\"]+)\"", html, 1);
+                pic = group("<img[^>]*class=\"lazyload\"[^>]*data-original=\"([^\"]+)\"", html, 1);
+                if (pic.isEmpty()) {
+                    pic = group("<img[^>]*class=\"lazyload\"[^>]*src=\"([^\"]+)\"", html, 1);
+                }
             }
             if (!pic.isEmpty() && !pic.startsWith("http")) pic = host + pic;
             info.put("vod_pic", pic);
 
-            String remarks = group("<[^>]*class=\"score\"[^>]*>([^<]*)</", html, 1);
-            if (remarks.isEmpty()) {
-                remarks = group("<[^>]*class=\"text-red\"[^>]*>([^<]*)</", html, 1);
+            // ★ 参数行：<h1 class="v_title">...</h1><p>大陆 / 2026 / 剧情,爱情 / 导演:xxx / 主演:xxx...</p>
+            String infoLine = group(
+                "<h1[^>]*class=\"v_title\"[^>]*>[\\s\\S]*?</h1>\\s*<p>([\\s\\S]*?)<a",
+                html, 1
+            );
+            if (infoLine.isEmpty()) {
+                infoLine = group(
+                    "<h1[^>]*class=\"v_title\"[^>]*>[\\s\\S]*?</h1>\\s*<p>([\\s\\S]*?)</p>",
+                    html, 1
+                );
             }
-            info.put("vod_remarks", remarks.trim());
+            infoLine = infoLine.replaceAll("<[^>]+>", "").trim();
 
-            // 参数（来自 .v_info_box p）
-            String infoStr = group("<[^>]*class=\"v_info_box\"[^>]*>\\s*<p[^>]*>([^<]+)</p>", html, 1);
-            if (infoStr.isEmpty()) {
-                infoStr = group("<[^>]*class=\"v_info_box\"[^>]*>([\\s\\S]*?)</div>", html, 1);
-                infoStr = infoStr.replaceAll("<[^>]+>", "").trim();
-            }
-            infoStr = infoStr.trim();
             String vodArea = "", vodYear = "", typeName = "", vodDirector = "", vodActor = "";
-            if (!infoStr.isEmpty()) {
-                String[] segs = infoStr.split("/");
-                if (segs.length >= 3) {
-                    vodArea = segs[0].trim();
-                    vodYear = segs[1].trim();
-                    typeName = segs[2].trim();
-                    for (int i = 3; i < segs.length; i++) {
-                        String seg = segs[i].trim();
-                        if (seg.startsWith("导演:")) {
-                            vodDirector = seg.substring(3).trim();
-                        } else if (seg.startsWith("主演:")) {
-                            vodActor = seg.substring(3).trim();
-                            vodActor = vodActor.replaceAll("剧情介绍.*$", "").trim();
-                        }
-                    }
+            String[] segs = infoLine.split("/");
+            if (segs.length > 0) vodArea = segs[0].trim();
+            if (segs.length > 1) vodYear = segs[1].trim();
+            if (segs.length > 2) typeName = segs[2].trim();
+            for (int i = 3; i < segs.length; i++) {
+                String seg = segs[i].trim();
+                if (seg.startsWith("导演:")) {
+                    vodDirector = seg.substring(3).trim();
+                } else if (seg.startsWith("主演:")) {
+                    vodActor = seg.substring(3).trim();
+                    vodActor = vodActor.replaceAll("剧情介绍.*$", "").trim();
                 }
             }
             info.put("vod_director", vodDirector);
@@ -289,23 +289,28 @@ public class SaoHuo extends Spider {
             info.put("vod_year", vodYear);
             info.put("vod_class", typeName);
 
-            // 简介
-            String content = group("<[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)</", html, 1);
+            // ★ 简介：<p class="p_txt show_part">剧情简介：xxx</p>
+            String content = group("<p[^>]*class=\"p_txt[^\"]*\"[^>]*>([\\s\\S]*?)</p>", html, 1);
+            if (content.isEmpty()) {
+                content = group("<[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)</", html, 1);
+            }
             if (content.isEmpty()) {
                 content = group("<[^>]*class=\"des\"[^>]*>([\\s\\S]*?)</", html, 1);
             }
-            if (content.isEmpty()) {
-                content = group("<p[^>]*class=\"p_txt\"[^>]*>([\\s\\S]*?)</p>", html, 1);
-            }
-            if (content.isEmpty()) {
-                content = group("<div[^>]*id=\"info_more\"[^>]*>([\\s\\S]*?)</div>", html, 1);
-            }
-            info.put("vod_content", content.replaceAll("<[^>]+>", "").trim());
+            content = content.replaceAll("<[^>]+>", "").trim();
+            content = content.replaceAll("^(剧情)?简介[:：]\\s*", "").trim();
+            info.put("vod_content", content);
 
-            // 播放列表
+            // 播放列表（不动）
             String[] pl = extractPlaylist(html);
             info.put("vod_play_from", pl[0]);
             info.put("vod_play_url", pl[1]);
+
+            SpiderDebug.log("detail: name=" + name);
+            SpiderDebug.log("detail: area=" + vodArea + " year=" + vodYear + " type=" + typeName);
+            SpiderDebug.log("detail: director=" + vodDirector + " actor=" + vodActor);
+            SpiderDebug.log("detail: content=" + content);
+            SpiderDebug.log("detail: from=" + pl[0]);
 
             JSONArray list = new JSONArray();
             list.put(info);
@@ -319,8 +324,7 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // 播放列表（原版用 cheerio 查 .play_from ul.from_list li + #play_link > li）
-    // Java 里用正则逐块抠
+    // 播放列表（原样保留）
     // ============================================================
     private String[] extractPlaylist(String html) {
         List<String> sourceNames = new ArrayList<>();
@@ -350,7 +354,6 @@ public class SaoHuo extends Spider {
             linkBlocks.add(linkM.group(1));
         }
 
-        // 如果 #play_link 是 ul，里面每个 li 是一线路
         if (!linkBlocks.isEmpty()) {
             String inner = linkBlocks.get(0);
             Matcher liM = Pattern.compile("<li[^>]*>([\\s\\S]*?)</li>", Pattern.DOTALL).matcher(inner);
@@ -367,7 +370,6 @@ public class SaoHuo extends Spider {
             }
         }
 
-        // 兜底：直接找 #play_link
         if (sourceNames.isEmpty()) {
             Matcher liM = Pattern.compile("<li[^>]*>([\\s\\S]*?)</li>", Pattern.DOTALL).matcher(html);
             int idx = 0;
@@ -392,7 +394,6 @@ public class SaoHuo extends Spider {
         while (aM.find()) {
             String href = aM.group(1);
             String text = aM.group(2).trim();
-            // 提取数字
             String numStr = text.replaceAll("[^0-9]", "");
             int num = 9999;
             if (!numStr.isEmpty()) {
@@ -400,7 +401,6 @@ public class SaoHuo extends Spider {
             }
             eps.add(new String[]{text, href, String.valueOf(num)});
         }
-        // 按 num 排序
         eps.sort((a, b) -> {
             try { return Integer.parseInt(a[2]) - Integer.parseInt(b[2]); }
             catch (Exception e) { return 0; }
@@ -443,7 +443,7 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // play（三层：播放页 → hhplayer → POST /api/parse）
+    // play（三层：播放页 → hhplayer → POST /api/parse）原样保留
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
@@ -593,15 +593,12 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // 列表解析（原版用 cheerio 查 .v_list li 等 5 种选择器）
+    // 列表解析
     // ============================================================
     private List<JSONObject> extractList(String html, int limit) {
         List<JSONObject> list = new ArrayList<>();
         if (html == null || html.isEmpty()) return list;
         try {
-            // 通用：找所有含 <a href> + img 的卡片块
-            // 原版多选择器：.v_list li / .module-item / .myui-vodlist__box / .stui-vodlist__box / li.vodlist_box
-            // Java 简化：匹配所有 <a href="..." title="...">...<img data-original="...">...</a>
             Pattern cardPattern = Pattern.compile(
                 "<a[^>]*href=\"([^\"]+)\"[^>]*title=\"([^\"]*)\"[^>]*>[\\s\\S]*?" +
                 "<img[^>]*(?:data-original|src)=\"([^\"]+)\"[^>]*>[\\s\\S]*?" +
@@ -637,9 +634,6 @@ public class SaoHuo extends Spider {
         return list;
     }
 
-    // ============================================================
-    // extractPageCount
-    // ============================================================
     private int extractPageCount(String html, int page, int listSize) {
         int pagecount = page;
         try {
