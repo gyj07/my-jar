@@ -32,6 +32,15 @@
   ],
   "sites": [
     {
+      "key": "nm",
+      "name": "Nm",
+      "type": 3,
+      "api": "csp_Nm",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "douban",
       "name": "Douban",
       "type": 3,
