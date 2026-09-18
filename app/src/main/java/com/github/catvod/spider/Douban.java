@@ -10,7 +10,6 @@ import com.github.catvod.net.OkHttp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,28 +37,15 @@ public class Douban extends Spider {
     // init
     // ============================================================
     @Override
-    public void init(Context context, String extend) {
-        try {
-            headers.put("Host", "frodo.douban.com");
-            headers.put("Connection", "Keep-Alive");
-            headers.put("Referer", "https://servicewechat.com/wx2f9b06c1de1ccfca/84/page-frame.html");
-            headers.put("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36 MicroMessenger/7.0.9.501 NetType/WIFI MiniProgramEnv/Windows WindowsWechat");
-            headers.put("Accept", "application/json, text/plain, */*");
-            headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+    public void init(Context context, String extend) throws Exception {
+        headers.put("Host", "frodo.douban.com");
+        headers.put("Connection", "Keep-Alive");
+        headers.put("Referer", "https://servicewechat.com/wx2f9b06c1de1ccfca/84/page-frame.html");
+        headers.put("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36 MicroMessenger/7.0.9.501 NetType/WIFI MiniProgramEnv/Windows WindowsWechat");
+        headers.put("Accept", "application/json, text/plain, */*");
+        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
 
-            filters = buildFilters();
-        } catch (Exception e) {
-            SpiderDebug.log("init error: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public String getName() {
-        return "豆瓣影视";
-    }
-
-    @Override
-    public void destroy() {
+        filters = buildFilters();
     }
 
     // ============================================================
@@ -102,19 +88,15 @@ public class Douban extends Spider {
 
             String score = "";
             JSONObject rating = item.optJSONObject("rating");
-            if (rating != null) {
-                score = rating.optString("value", "");
-            }
+            if (rating != null) score = rating.optString("value", "");
 
             String picUrl = "";
             JSONObject pic = item.optJSONObject("pic");
             if (pic != null) picUrl = pic.optString("normal", "");
-
             if (!TextUtils.isEmpty(picUrl)) {
                 if (picUrl.startsWith("//")) {
                     picUrl = "https:" + picUrl;
                 } else if (!picUrl.startsWith("http://") && !picUrl.startsWith("https://")) {
-                    // 去掉左边所有 /
                     while (picUrl.startsWith("/")) picUrl = picUrl.substring(1);
                     picUrl = "https://" + picUrl;
                 }
@@ -308,7 +290,7 @@ public class Douban extends Spider {
     }
 
     @Override
-    public String homeVideoContent() {
+    public String homeVideoContent() throws Exception {
         return "{}";
     }
 
@@ -435,6 +417,11 @@ public class Douban extends Spider {
     // searchContent
     // ============================================================
     @Override
+    public String searchContent(String key, boolean quick) throws Exception {
+        return searchContent(key, quick, "1");
+    }
+
+    @Override
     public String searchContent(String key, boolean quick, String pg) throws Exception {
         JSONObject result = new JSONObject();
         result.put("list", new JSONArray());
@@ -443,11 +430,6 @@ public class Douban extends Spider {
         result.put("limit", 0);
         result.put("total", 0);
         return result.toString();
-    }
-
-    @Override
-    public String searchContent(String key, boolean quick) throws Exception {
-        return searchContent(key, quick, "1");
     }
 
     // ============================================================
@@ -464,5 +446,13 @@ public class Douban extends Spider {
             result.put("url", "");
         }
         return result.toString();
+    }
+
+    // ============================================================
+    // destroy
+    // ============================================================
+    @Override
+    public void destroy() {
+        SpiderDebug.log("Douban destroy");
     }
 }
