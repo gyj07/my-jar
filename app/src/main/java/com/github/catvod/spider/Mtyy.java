@@ -10,7 +10,6 @@ import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.net.URLEncoder;
@@ -31,13 +30,10 @@ public class Mtyy extends Spider {
     private Map<String, String> getHeaders() {
         Map<String, String> h = new HashMap<>();
         h.put("User-Agent", UA);
-        h.put("Referer", HOST);
+        h.put("Referer", HOST + "/");
         return h;
     }
 
-    // ============================================================
-    // 工具
-    // ============================================================
     private String fetch(String url) {
         try {
             String body = OkHttp.string(url, getHeaders());
@@ -94,9 +90,7 @@ public class Mtyy extends Spider {
             String name = cleanText(m.group(2));
             String pic = fixUrl(m.group(3));
             String remark = cleanText(m.group(4));
-            if (!name.isEmpty()) {
-                list.add(new Vod(href, name, pic, remark));
-            }
+            if (!name.isEmpty()) list.add(new Vod(href, name, pic, remark));
         }
         return list;
     }
@@ -117,9 +111,7 @@ public class Mtyy extends Spider {
             String name = cleanText(m.group(2));
             String pic = fixUrl(m.group(3));
             String remark = cleanText(m.group(4));
-            if (!name.isEmpty()) {
-                list.add(new Vod(href, name, pic, remark));
-            }
+            if (!name.isEmpty()) list.add(new Vod(href, name, pic, remark));
         }
         return list;
     }
@@ -137,7 +129,6 @@ public class Mtyy extends Spider {
 
         LinkedHashMap<String, List<Filter>> filters = new LinkedHashMap<>();
 
-        // 1 电影
         List<Filter> f1 = new ArrayList<>();
         f1.add(filter("class", "类型", new String[][]{
             {"全部", ""}, {"动作", "动作"}, {"喜剧", "喜剧"}, {"爱情", "爱情"},
@@ -159,7 +150,6 @@ public class Mtyy extends Spider {
         }));
         filters.put("1", f1);
 
-        // 2 电视剧
         List<Filter> f2 = new ArrayList<>();
         f2.add(filter("class", "类型", new String[][]{
             {"全部", ""}, {"国产剧", "国产剧"}, {"港剧", "港剧"}, {"台剧", "台剧"},
@@ -179,7 +169,6 @@ public class Mtyy extends Spider {
         }));
         filters.put("2", f2);
 
-        // 3 综艺
         List<Filter> f3 = new ArrayList<>();
         f3.add(filter("year", "年份", new String[][]{
             {"全部", ""}, {"2026", "2026"}, {"2025", "2025"}, {"2024", "2024"}, {"2023", "2023"}
@@ -189,7 +178,6 @@ public class Mtyy extends Spider {
         }));
         filters.put("3", f3);
 
-        // 4 动漫
         List<Filter> f4 = new ArrayList<>();
         f4.add(filter("area", "地区", new String[][]{
             {"全部", ""}, {"中国大陆", "中国大陆"}, {"日本", "日本"}, {"美国", "美国"}
@@ -202,8 +190,7 @@ public class Mtyy extends Spider {
         }));
         filters.put("4", f4);
 
-        // 首页推荐
-        String html = fetch(HOST);
+        String html = fetch(HOST + "/");
         List<Vod> list = parseVideoList(html);
 
         return Result.string(classes, list);
@@ -217,9 +204,6 @@ public class Mtyy extends Spider {
         return new Filter(key, name, list);
     }
 
-    // ============================================================
-    // homeVideoContent
-    // ============================================================
     @Override
     public String homeVideoContent() throws Exception {
         return "{}";
@@ -240,17 +224,15 @@ public class Mtyy extends Spider {
         String byVal    = extend != null && extend.get("by")    != null ? extend.get("by")    : "hits_week";
         if (byVal.isEmpty()) byVal = "hits_week";
 
-        // 地区名称简化
         if ("中国香港".equals(areaVal)) areaVal = "香港";
         if ("中国台湾".equals(areaVal)) areaVal = "台湾";
 
         boolean hasFilter = !classVal.isEmpty() || !areaVal.isEmpty() || !yearVal.isEmpty() || !"hits_week".equals(byVal);
 
         List<Vod> list = new ArrayList<>();
-        String html = "";
+        String html;
 
         if (hasFilter) {
-            // /vodshow/ 格式（11 个参数段）
             String[] parts = {tid, areaVal, byVal, classVal, "", "", yearVal, "", "", "", ""};
             String showUrl = HOST + "/vodshow/" + String.join("-", parts) + ".html";
             html = fetch(showUrl);
@@ -269,33 +251,26 @@ public class Mtyy extends Spider {
     }
 
     // ============================================================
-    // detailContent
+    // ★ detailContent（方案 A：抓每个 sid 拿 from → 动态线路名）
     // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
         String vid = ids.get(0);
         String url = vid.startsWith("http") ? vid : (vid.startsWith("/") ? HOST + vid : HOST + "/" + vid);
-
         String html = fetch(url);
-        if (TextUtils.isEmpty(html)) {
-            return Result.string(new ArrayList<Vod>());
-        }
+        if (TextUtils.isEmpty(html)) return Result.string(new ArrayList<Vod>());
 
         Vod vod = new Vod();
         vod.setVodId(vid);
 
-        // 标题
+        // 片名
         String title = group("<div class=\"this-desc-title\"[^>]*>([^<]+)</div>", html, 1);
         vod.setVodName(cleanText(title));
 
-        // 海报（多种匹配）
+        // 海报
         String pic = group("style=\"background-image:\\s*url\\('([^']+)'\\)\"", html, 1);
-        if (pic.isEmpty()) {
-            pic = group("<img[^>]*class=\"[^\"]*this-pic[^\"]*\"[^>]*src=\"([^\"]+)\"", html, 1);
-        }
-        if (pic.isEmpty()) {
-            pic = group("data-src=\"([^\"]+)\"[^>]*class=\"[^\"]*this-pic[^\"]*\"", html, 1);
-        }
+        if (pic.isEmpty()) pic = group("<img[^>]*class=\"[^\"]*this-pic[^\"]*\"[^>]*src=\"([^\"]+)\"", html, 1);
+        if (pic.isEmpty()) pic = group("data-src=\"([^\"]+)\"[^>]*class=\"[^\"]*this-pic[^\"]*\"", html, 1);
         vod.setVodPic(pic);
 
         // 演员
@@ -317,12 +292,8 @@ public class Mtyy extends Spider {
 
         // 简介
         String content = group("<div id=\"height_limit\"[^>]*>.*?<strong class=\"r6\">描述[：:]</strong>(.*?)</div>", html, 1);
-        if (content.isEmpty()) {
-            content = group("<strong class=\"r6\">描述[：:]</strong>(.*?)</div>", html, 1);
-        }
-        if (content.isEmpty()) {
-            content = group("<div class=\"this-desc-text\"[^>]*>(.*?)</div>", html, 1);
-        }
+        if (content.isEmpty()) content = group("<strong class=\"r6\">描述[：:]</strong>(.*?)</div>", html, 1);
+        if (content.isEmpty()) content = group("<div class=\"this-desc-text\"[^>]*>(.*?)</div>", html, 1);
         vod.setVodContent(cleanText(content.replaceAll("<[^>]+>", "")));
 
         // 年份
@@ -332,96 +303,114 @@ public class Mtyy extends Spider {
             vod.setVodYear(cleanText(year));
         }
 
-        // 地区/状态/语言
+        // 地区/状态
         String infoBlock = group("<div class=\"this-desc-info\"[^>]*>(.*?)</div>", html, 1);
         if (!infoBlock.isEmpty()) {
             List<String> spans = new ArrayList<>();
             Matcher sm = Pattern.compile("<span[^>]*>([^<]*)</span>").matcher(infoBlock);
             while (sm.find()) {
                 String s = cleanText(sm.group(1));
-                if (!s.isEmpty() && !s.matches("^[0-9.]+$")) {
-                    spans.add(s);
-                }
+                if (!s.isEmpty() && !s.matches("^[0-9.]+$")) spans.add(s);
             }
-            String status = "", lang = "", area = "";
+            String status = "", area = "";
             for (String span : spans) {
                 if (span.matches(".*[集期].*|.*完结.*|.*更新.*|.*连载.*")) status = span;
-                else if (Arrays.asList("汉语普通话","普通话","国语","汉语","英语","日语","韩语").contains(span)) lang = span;
                 else if (Arrays.asList("中国大陆","香港","台湾","美国","日本","韩国","英国","法国","泰国").contains(span)) area = span;
             }
             if (area.isEmpty() && !spans.isEmpty()) area = spans.get(0);
-            if (lang.isEmpty() && spans.size() >= 2) lang = spans.get(1);
             if (status.isEmpty() && spans.size() >= 3) status = spans.get(2);
             vod.setVodArea(area);
             vod.setVodRemarks(status);
         }
 
-        // ========== 播放列表 ==========
+        // ============================================================
+        // ★ 播放列表（方案 A）
+        // ============================================================
+
+        // 1. 从详情页抠所有 /vodplay/{vid}-{sid}-{nid}.html，按 sid 分组
+        Map<String, List<String>> sidGroups = new LinkedHashMap<>();
+        Matcher allM = Pattern.compile(
+            "<a[^>]*href=\"(/vodplay/(\\d+)-(\\d+)-(\\d+)\\.html)\"[^>]*>([^<]+)</a>",
+            Pattern.DOTALL
+        ).matcher(html);
+        while (allM.find()) {
+            String fullPath = allM.group(1);
+            String sid = allM.group(3);
+            String epName = cleanText(allM.group(5));
+            if (!sidGroups.containsKey(sid)) sidGroups.put(sid, new ArrayList<>());
+            sidGroups.get(sid).add(epName + "$" + HOST + fullPath);
+        }
+
+        SpiderDebug.log("Mtyy 抓到 " + sidGroups.size() + " 条线路");
+
+        if (sidGroups.isEmpty()) {
+            vod.setVodPlayFrom("麦田影院");
+            vod.setVodPlayUrl("");
+            return Result.string(vod);
+        }
+
+        // 2. 排序 sid（数字升序）
+        List<String> sidKeys = new ArrayList<>(sidGroups.keySet());
+        try {
+            sidKeys.sort((a, b) -> Integer.parseInt(a) - Integer.parseInt(b));
+        } catch (Exception ignored) {}
+
+        // 3. 抠详情页 ID
+        String detailId = vid.replaceAll(".*?(\\d+)\\.html.*", "$1");
+        if (detailId.isEmpty()) detailId = vid.replaceAll("\\D+", "");
+
+        // 4. 遍历每个 sid 抓播放页拿 from，同时第一次顺便抠 data-form → 中文名
+        Map<String, String> formToName = new HashMap<>();
         List<String> ktabs = new ArrayList<>();
         List<String> klists = new ArrayList<>();
 
-        // 线路名
-        List<String> sourceTabs = new ArrayList<>();
-        Matcher tabM = Pattern.compile("&nbsp;([^<]+?)(?:<span|</a>)", Pattern.DOTALL).matcher(html);
-        while (tabM.find()) {
-            String n = cleanText(tabM.group(1));
-            if (!n.isEmpty() && !Arrays.asList("选集","排序","全部","").contains(n)) {
-                sourceTabs.add(n);
-            }
-        }
+        for (String sid : sidKeys) {
+            List<String> eps = sidGroups.get(sid);
+            if (eps.isEmpty()) continue;
 
-        // 剧集块
-        Matcher boxM = Pattern.compile("<div class=\"anthology-list-box[^\"]*\"[^>]*>(.*?)</div>", Pattern.DOTALL).matcher(html);
-        int idx = 0;
-        while (boxM.find()) {
-            String block = boxM.group(1);
-            List<String> eps = new ArrayList<>();
-            Matcher aM = Pattern.compile("<li[^>]*>.*?<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>", Pattern.DOTALL).matcher(block);
-            while (aM.find()) {
-                String epUrl = fixUrl(aM.group(1).trim());
-                String epName = cleanText(aM.group(2));
-                eps.add(epName + "$" + epUrl);
-            }
-            if (!eps.isEmpty()) {
-                String name = idx < sourceTabs.size() ? sourceTabs.get(idx) : ("播放源" + (idx + 1));
-                ktabs.add(name);
-                klists.add(String.join("#", eps));
-                idx++;
-            }
-        }
+            String testUrl = HOST + "/vodplay/" + detailId + "-" + sid + "-1.html";
+            String testHtml = fetch(testUrl);
+            String from = "";
 
-        // 备用提取
-        if (ktabs.isEmpty()) {
-            Matcher allM = Pattern.compile("<a[^>]*href=\"(/vodplay/[^\"]+)\"[^>]*>([^<]+)</a>").matcher(html);
-            Map<String, List<String>> groups = new LinkedHashMap<>();
-            while (allM.find()) {
-                String epUrl = allM.group(1);
-                String epName = cleanText(allM.group(2));
-                Matcher idM = Pattern.compile("/vodplay/\\d+-(\\d+)-\\d+\\.html").matcher(epUrl);
-                if (idM.find()) {
-                    String srcIdx = idM.group(1);
-                    if (!groups.containsKey(srcIdx)) groups.put(srcIdx, new ArrayList<>());
-                    groups.get(srcIdx).add(epName + "$" + HOST + epUrl);
+            if (!TextUtils.isEmpty(testHtml)) {
+                // 抠 from
+                String testJson = group("var\\s+player_data\\s*=\\s*(\\{.*?\\})\\s*<", testHtml, 1);
+                if (TextUtils.isEmpty(testJson)) {
+                    testJson = group("player_aaaa\\s*=\\s*(\\{.*?\\})\\s*</script>", testHtml, 1);
+                }
+                if (!TextUtils.isEmpty(testJson)) {
+                    try {
+                        JSONObject p = new JSONObject(testJson);
+                        from = p.optString("from", "");
+                    } catch (Exception ignored) {}
+                }
+
+                // 第一次抓时顺便抠 data-form → 中文名
+                if (formToName.isEmpty()) {
+                    Matcher formM = Pattern.compile(
+                        "data-form=\"([^\"]+)\"[^>]*>[\\s\\S]*?&nbsp;([^<]+?)(?:<span|</a>)",
+                        Pattern.DOTALL
+                    ).matcher(testHtml);
+                    while (formM.find()) {
+                        String form = formM.group(1).trim();
+                        String name = cleanText(formM.group(2));
+                        if (!form.isEmpty() && !name.isEmpty()) {
+                            formToName.put(form, name);
+                        }
+                    }
                 }
             }
-            Map<String, String> nameMap = new HashMap<>();
-            nameMap.put("6", "MT源");
-            nameMap.put("5", "BD源");
-            nameMap.put("4", "NB源");
-            nameMap.put("1", "BF源");
-            nameMap.put("2", "LZ源");
-            nameMap.put("3", "MD源");
 
-            List<String> keys = new ArrayList<>(groups.keySet());
-            java.util.Collections.sort(keys);
-            for (String k : keys) {
-                List<String> eps = groups.get(k);
-                if (!eps.isEmpty()) {
-                    ktabs.add(nameMap.getOrDefault(k, "播放源" + k));
-                    klists.add(String.join("#", eps));
-                }
-            }
+            // 用 from 查中文名
+            String name = formToName.containsKey(from) ? formToName.get(from) : ("播放源" + sid);
+            ktabs.add(name);
+            klists.add(String.join("#", eps));
+
+            SpiderDebug.log("Mtyy sid=" + sid + " from=" + from + " name=" + name + " 集数=" + eps.size());
         }
+
+        SpiderDebug.log("Mtyy formToName = " + formToName);
+        SpiderDebug.log("Mtyy 线路名 = " + ktabs);
 
         vod.setVodPlayFrom(ktabs.isEmpty() ? "麦田影院" : String.join("$$$", ktabs));
         vod.setVodPlayUrl(klists.isEmpty() ? "" : String.join("$$$", klists));
@@ -453,7 +442,7 @@ public class Mtyy extends Spider {
     }
 
     // ============================================================
-    // playerContent
+    // ★ playerContent（player_data + NBY 两步解密）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -464,41 +453,98 @@ public class Mtyy extends Spider {
             return Result.get().url("").header(getHeaders()).string();
         }
 
-        // 方法1: script 里抠 url
-        Matcher m1 = Pattern.compile("[\"']?url[\"']?\\s*[:=]\\s*[\"']([^\"']+\\.m3u8[^\"']*)[\"']", Pattern.DOTALL).matcher(html);
-        while (m1.find()) {
-            String realUrl = m1.group(1).replace("\\/", "/");
-            if (realUrl.startsWith("//")) realUrl = "https:" + realUrl;
-            if (realUrl.startsWith("http")) {
-                return Result.get().url(realUrl).header(getHeaders()).string();
+        // ★ 抠 player_data 或 player_aaaa
+        String json = group("var\\s+player_data\\s*=\\s*(\\{.*?\\})\\s*<", html, 1);
+        if (TextUtils.isEmpty(json)) {
+            json = group("player_aaaa\\s*=\\s*(\\{.*?\\})\\s*</script>", html, 1);
+        }
+
+        String url = "";
+        String from = "";
+
+        if (!TextUtils.isEmpty(json)) {
+            try {
+                JSONObject player = new JSONObject(json);
+                url = player.optString("url", "");
+                from = player.optString("from", "");
+            } catch (Exception e) {
+                url = group("\"url\"\\s*:\\s*\"([^\"]+)\"", json, 1);
+                from = group("\"from\"\\s*:\\s*\"([^\"]+)\"", json, 1);
             }
         }
 
-        // 方法2: 直接找 m3u8
-        String m3u8 = group("(https?://[^\"']+\\.m3u8[^\"']*)", html, 1);
-        if (!m3u8.isEmpty()) {
-            return Result.get().url(m3u8).header(getHeaders()).string();
+        url = url.replace("\\/", "/");
+        if (url.startsWith("//")) url = "https:" + url;
+        if (url.startsWith("/")) url = HOST + url;
+
+        SpiderDebug.log("Mtyy player.url = " + url);
+        SpiderDebug.log("Mtyy player.from = " + from);
+
+        // ① 直链 m3u8/mp4 → parse:0
+        if (!TextUtils.isEmpty(url) && url.matches(".*\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?.*)?$")) {
+            SpiderDebug.log("✅ 直链");
+            return Result.get().url(url).header(getHeaders()).string();
         }
 
-        // 方法3: player_data
-        String playerData = group("var\\s+player_data\\s*=\\s*(\\{[^;]+?\\});", html, 1);
-        if (!playerData.isEmpty()) {
-            String u = group("[\"']?url[\"']?\\s*:\\s*[\"']([^\"']+)[\"']", playerData, 1);
-            if (!u.isEmpty()) {
-                String realUrl = u.replace("\\/", "/");
-                if (realUrl.startsWith("//")) realUrl = "https:" + realUrl;
-                if (realUrl.startsWith("http")) {
-                    return Result.get().url(realUrl).header(getHeaders()).string();
+        // ② 第三方 → art.php 两步解密
+        if (!TextUtils.isEmpty(url)) {
+            // 第一步：get_signed_url
+            String api1 = HOST + "/static/player/art.php?get_signed_url=1&url=" + urlEncode(url);
+            Map<String, String> h1 = new HashMap<>();
+            h1.put("User-Agent", UA);
+            h1.put("X-Requested-With", "XMLHttpRequest");
+            h1.put("Referer", playUrl);
+
+            String resp1 = "";
+            try {
+                resp1 = OkHttp.string(api1, h1);
+            } catch (Exception e) {
+                SpiderDebug.log("get_signed_url error: " + e.getMessage());
+            }
+
+            String signedUrl = "";
+            try {
+                JSONObject j1 = new JSONObject(resp1);
+                signedUrl = j1.optString("signed_url", "");
+            } catch (Exception ignored) {}
+
+            if (!TextUtils.isEmpty(signedUrl)) {
+                // 第二步：请求 signed_url
+                String api2 = HOST + "/static/player/art.php" + signedUrl;
+                String resp2 = "";
+                try {
+                    resp2 = OkHttp.string(api2, h1);
+                } catch (Exception e) {
+                    SpiderDebug.log("signed_url error: " + e.getMessage());
+                }
+
+                try {
+                    JSONObject j2 = new JSONObject(resp2);
+                    String jmurl = j2.optString("jmurl", "");
+                    if (TextUtils.isEmpty(jmurl)) jmurl = j2.optString("url", "");
+                    if (TextUtils.isEmpty(jmurl)) jmurl = j2.optString("signedUrl", "");
+                    if (!TextUtils.isEmpty(jmurl)) {
+                        jmurl = jmurl.replace("\\/", "/");
+                        SpiderDebug.log("✅✅ 解密成功: " + jmurl);
+                        return Result.get().url(jmurl).header(getHeaders()).string();
+                    }
+                } catch (Exception e) {
+                    SpiderDebug.log("resp2 JSON 失败: " + e.getMessage());
+                    String m3u8 = group("(https?://[^\\s\"'<>]+?\\.m3u8[^\\s\"'<>]*)", resp2, 1);
+                    if (!TextUtils.isEmpty(m3u8)) {
+                        return Result.get().url(m3u8).header(getHeaders()).string();
+                    }
                 }
             }
         }
 
-        // 方法4: mp4/flv
-        String mp4 = group("[\"'](https?://[^\"']+\\.(?:mp4|flv))[\"']", html, 1);
-        if (!mp4.isEmpty()) {
-            return Result.get().url(mp4).header(getHeaders()).string();
+        // ③ 兜底
+        String m3u8 = group("(https?://[^\\s\"'<>]+?\\.m3u8[^\\s\"'<>]*)", html, 1);
+        if (!TextUtils.isEmpty(m3u8)) {
+            return Result.get().url(m3u8).header(getHeaders()).string();
         }
 
+        SpiderDebug.log("Mtyy：没抠到播放地址");
         return Result.get().url("").header(getHeaders()).string();
     }
 
