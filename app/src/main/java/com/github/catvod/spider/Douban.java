@@ -1,6 +1,5 @@
 package com.github.catvod.spider;
 
-import android.content.Context;
 import android.text.TextUtils;
 
 import com.github.catvod.crawler.Spider;
@@ -20,7 +19,7 @@ public class Douban extends Spider {
     private String apiKey = "0ac44ae016490db2204ce0a042db2916";
     private int count = 30;
 
-    private Map<String, String> headers = new HashMap<>();
+    private Map<String, String> headers;
     private JSONObject filters;
 
     private String[][] classesConfig = {
@@ -34,18 +33,19 @@ public class Douban extends Spider {
     };
 
     // ============================================================
-    // init
+    // ★ 没有 init，headers 惰性构造
     // ============================================================
-    @Override
-    public void init(Context context, String extend) throws Exception {
-        headers.put("Host", "frodo.douban.com");
-        headers.put("Connection", "Keep-Alive");
-        headers.put("Referer", "https://servicewechat.com/wx2f9b06c1de1ccfca/84/page-frame.html");
-        headers.put("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36 MicroMessenger/7.0.9.501 NetType/WIFI MiniProgramEnv/Windows WindowsWechat");
-        headers.put("Accept", "application/json, text/plain, */*");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
-
-        filters = buildFilters();
+    private Map<String, String> getHeaders() {
+        if (headers == null) {
+            headers = new HashMap<>();
+            headers.put("Host", "frodo.douban.com");
+            headers.put("Connection", "Keep-Alive");
+            headers.put("Referer", "https://servicewechat.com/wx2f9b06c1de1ccfca/84/page-frame.html");
+            headers.put("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36 MicroMessenger/7.0.9.501 NetType/WIFI MiniProgramEnv/Windows WindowsWechat");
+            headers.put("Accept", "application/json, text/plain, */*");
+            headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+        }
+        return headers;
     }
 
     // ============================================================
@@ -53,7 +53,7 @@ public class Douban extends Spider {
     // ============================================================
     private JSONObject fetch(String url) {
         try {
-            String body = OkHttp.string(url, headers);
+            String body = OkHttp.string(url, getHeaders());
             if (TextUtils.isEmpty(body)) return null;
             return new JSONObject(body);
         } catch (Exception e) {
@@ -253,44 +253,55 @@ public class Douban extends Spider {
     }
 
     // ============================================================
-    // homeContent
+    // homeContent（★ filters 懒加载）
     // ============================================================
     @Override
-    public String homeContent(boolean filter) throws Exception {
-        JSONObject result = new JSONObject();
-        JSONArray classes = new JSONArray();
-        JSONArray vlist = new JSONArray();
+    public String homeContent(boolean filter) {
+        try {
+            JSONObject result = new JSONObject();
 
-        for (String[] c : classesConfig) {
-            JSONObject obj = new JSONObject();
-            obj.put("type_name", c[0]);
-            obj.put("type_id", c[1]);
-            classes.put(obj);
-        }
+            // ★ 懒加载 filters
+            if (filters == null) {
+                try { filters = buildFilters(); } catch (Exception e) { filters = new JSONObject(); }
+            }
 
-        result.put("class", classes);
-        result.put("filters", filters == null ? new JSONObject() : filters);
+            JSONArray classes = new JSONArray();
+            JSONArray vlist = new JSONArray();
 
-        Map<String, String> params = new HashMap<>();
-        params.put("start", "0");
-        params.put("count", "20");
-        JSONObject data = apiRequest("/api/v2/subject_collection/subject_real_time_hotest/items", params);
-        if (data != null) {
-            JSONArray items = data.optJSONArray("subject_collection_items");
-            if (items != null) {
-                for (int i = 0; i < items.length(); i++) {
-                    JSONObject parsed = parseItem(items.optJSONObject(i));
-                    if (parsed != null) vlist.put(parsed);
+            for (String[] c : classesConfig) {
+                JSONObject obj = new JSONObject();
+                obj.put("type_name", c[0]);
+                obj.put("type_id", c[1]);
+                classes.put(obj);
+            }
+
+            result.put("class", classes);
+            result.put("filters", filters);
+
+            Map<String, String> params = new HashMap<>();
+            params.put("start", "0");
+            params.put("count", "20");
+            JSONObject data = apiRequest("/api/v2/subject_collection/subject_real_time_hotest/items", params);
+            if (data != null) {
+                JSONArray items = data.optJSONArray("subject_collection_items");
+                if (items != null) {
+                    for (int i = 0; i < items.length(); i++) {
+                        JSONObject parsed = parseItem(items.optJSONObject(i));
+                        if (parsed != null) vlist.put(parsed);
+                    }
                 }
             }
-        }
 
-        result.put("list", vlist);
-        return result.toString();
+            result.put("list", vlist);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log("homeContent error: " + e.getMessage());
+            return "";
+        }
     }
 
     @Override
-    public String homeVideoContent() throws Exception {
+    public String homeVideoContent() {
         return "{}";
     }
 
@@ -299,153 +310,170 @@ public class Douban extends Spider {
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
-                                  HashMap<String, String> extend) throws Exception {
-        int page = 1;
-        try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
-        int start = (page - 1) * count;
+                                  HashMap<String, String> extend) {
+        try {
+            int page = 1;
+            try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
+            int start = (page - 1) * count;
 
-        String path = "";
-        String key = "";
+            String path = "";
+            String key = "";
 
-        if ("hot_gaia".equals(tid)) {
-            path = "/api/v2/movie/hot_gaia"; key = "items";
-        } else if ("tv_hot".equals(tid)) {
-            path = "/api/v2/subject_collection/tv_hot/items"; key = "subject_collection_items";
-        } else if ("show_hot".equals(tid)) {
-            path = "/api/v2/subject_collection/show_hot/items"; key = "subject_collection_items";
-        } else if ("movie".equals(tid)) {
-            path = "/api/v2/movie/recommend"; key = "items";
-        } else if ("tv".equals(tid)) {
-            path = "/api/v2/tv/recommend"; key = "items";
-        } else if ("rank_list_movie".equals(tid)) {
-            path = "/api/v2/subject_collection/movie_real_time_hotest/items"; key = "subject_collection_items";
-        } else if ("rank_list_tv".equals(tid)) {
-            path = "/api/v2/subject_collection/tv_real_time_hotest/items"; key = "subject_collection_items";
-        }
+            if ("hot_gaia".equals(tid)) {
+                path = "/api/v2/movie/hot_gaia"; key = "items";
+            } else if ("tv_hot".equals(tid)) {
+                path = "/api/v2/subject_collection/tv_hot/items"; key = "subject_collection_items";
+            } else if ("show_hot".equals(tid)) {
+                path = "/api/v2/subject_collection/show_hot/items"; key = "subject_collection_items";
+            } else if ("movie".equals(tid)) {
+                path = "/api/v2/movie/recommend"; key = "items";
+            } else if ("tv".equals(tid)) {
+                path = "/api/v2/tv/recommend"; key = "items";
+            } else if ("rank_list_movie".equals(tid)) {
+                path = "/api/v2/subject_collection/movie_real_time_hotest/items"; key = "subject_collection_items";
+            } else if ("rank_list_tv".equals(tid)) {
+                path = "/api/v2/subject_collection/tv_real_time_hotest/items"; key = "subject_collection_items";
+            }
 
-        JSONArray videos = new JSONArray();
+            JSONArray videos = new JSONArray();
 
-        if (!path.isEmpty()) {
-            Map<String, String> params = new HashMap<>();
-            params.put("start", String.valueOf(start));
-            params.put("count", String.valueOf(count));
+            if (!path.isEmpty()) {
+                Map<String, String> params = new HashMap<>();
+                params.put("start", String.valueOf(start));
+                params.put("count", String.valueOf(count));
 
-            if (extend != null) {
-                if ("hot_gaia".equals(tid)) {
-                    if (!TextUtils.isEmpty(extend.get("sort")))
-                        params.put("sort", extend.get("sort"));
-                    if (!TextUtils.isEmpty(extend.get("area"))
-                            && !"".equals(extend.get("area"))
-                            && !"全部".equals(extend.get("area")))
-                        params.put("area", extend.get("area"));
-                } else if ("tv_hot".equals(tid)) {
-                    if (!TextUtils.isEmpty(extend.get("type"))
-                            && !"".equals(extend.get("type"))
-                            && !"tv_hot".equals(extend.get("type")))
-                        path = "/api/v2/subject_collection/" + extend.get("type") + "/items";
-                } else if ("show_hot".equals(tid)) {
-                    if (!TextUtils.isEmpty(extend.get("type"))
-                            && !"".equals(extend.get("type"))
-                            && !"show_hot".equals(extend.get("type")))
-                        path = "/api/v2/subject_collection/" + extend.get("type") + "/items";
-                } else if ("movie".equals(tid) || "tv".equals(tid)) {
-                    if (!TextUtils.isEmpty(extend.get("sort")))
-                        params.put("sort", extend.get("sort"));
+                if (extend != null) {
+                    if ("hot_gaia".equals(tid)) {
+                        if (!TextUtils.isEmpty(extend.get("sort")))
+                            params.put("sort", extend.get("sort"));
+                        if (!TextUtils.isEmpty(extend.get("area"))
+                                && !"".equals(extend.get("area"))
+                                && !"全部".equals(extend.get("area")))
+                            params.put("area", extend.get("area"));
+                    } else if ("tv_hot".equals(tid)) {
+                        if (!TextUtils.isEmpty(extend.get("type"))
+                                && !"".equals(extend.get("type"))
+                                && !"tv_hot".equals(extend.get("type")))
+                            path = "/api/v2/subject_collection/" + extend.get("type") + "/items";
+                    } else if ("show_hot".equals(tid)) {
+                        if (!TextUtils.isEmpty(extend.get("type"))
+                                && !"".equals(extend.get("type"))
+                                && !"show_hot".equals(extend.get("type")))
+                            path = "/api/v2/subject_collection/" + extend.get("type") + "/items";
+                    } else if ("movie".equals(tid) || "tv".equals(tid)) {
+                        if (!TextUtils.isEmpty(extend.get("sort")))
+                            params.put("sort", extend.get("sort"));
 
-                    StringBuilder tags = new StringBuilder();
-                    String[] tagKeys = {"type", "area", "year", "tv_type", "show_type", "platform"};
-                    for (String k : tagKeys) {
-                        String v = extend.get(k);
-                        if (!TextUtils.isEmpty(v) && !"".equals(v)) {
-                            if (tags.length() > 0) tags.append(",");
-                            tags.append(v);
+                        StringBuilder tags = new StringBuilder();
+                        String[] tagKeys = {"type", "area", "year", "tv_type", "show_type", "platform"};
+                        for (String k : tagKeys) {
+                            String v = extend.get(k);
+                            if (!TextUtils.isEmpty(v) && !"".equals(v)) {
+                                if (tags.length() > 0) tags.append(",");
+                                tags.append(v);
+                            }
+                        }
+                        if (tags.length() > 0) params.put("tags", tags.toString());
+                    } else if ("rank_list_movie".equals(tid) || "rank_list_tv".equals(tid)) {
+                        if (!TextUtils.isEmpty(extend.get("rank"))
+                                && !"".equals(extend.get("rank")))
+                            path = "/api/v2/subject_collection/" + extend.get("rank") + "/items";
+                    }
+                }
+
+                JSONObject data = apiRequest(path, params);
+                if (data != null) {
+                    JSONArray items = data.optJSONArray(key);
+                    if (items != null) {
+                        for (int i = 0; i < items.length(); i++) {
+                            JSONObject parsed = parseItem(items.optJSONObject(i));
+                            if (parsed != null) videos.put(parsed);
                         }
                     }
-                    if (tags.length() > 0) params.put("tags", tags.toString());
-                } else if ("rank_list_movie".equals(tid) || "rank_list_tv".equals(tid)) {
-                    if (!TextUtils.isEmpty(extend.get("rank"))
-                            && !"".equals(extend.get("rank")))
-                        path = "/api/v2/subject_collection/" + extend.get("rank") + "/items";
                 }
             }
 
-            JSONObject data = apiRequest(path, params);
-            if (data != null) {
-                JSONArray items = data.optJSONArray(key);
-                if (items != null) {
-                    for (int i = 0; i < items.length(); i++) {
-                        JSONObject parsed = parseItem(items.optJSONObject(i));
-                        if (parsed != null) videos.put(parsed);
-                    }
-                }
-            }
+            JSONObject result = new JSONObject();
+            result.put("list", videos);
+            result.put("page", page);
+            result.put("pagecount", 9999);
+            result.put("limit", 90);
+            result.put("total", 999999);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log("categoryContent error: " + e.getMessage());
+            return "";
         }
-
-        JSONObject result = new JSONObject();
-        result.put("list", videos);
-        result.put("page", page);
-        result.put("pagecount", 9999);
-        result.put("limit", 90);
-        result.put("total", 999999);
-        return result.toString();
     }
 
     // ============================================================
     // detailContent
     // ============================================================
     @Override
-    public String detailContent(List<String> ids) throws Exception {
-        String vid = ids.isEmpty() ? "" : ids.get(0);
-        JSONObject result = new JSONObject();
-        JSONArray list = new JSONArray();
+    public String detailContent(List<String> ids) {
+        try {
+            String vid = ids.isEmpty() ? "" : ids.get(0);
+            JSONObject result = new JSONObject();
+            JSONArray list = new JSONArray();
 
-        if (!TextUtils.isEmpty(vid) && vid.startsWith("msearch:")) {
-            String keyword = vid.replace("msearch:", "");
-            JSONObject vod = new JSONObject();
-            vod.put("vod_id", "search://" + keyword);
-            vod.put("vod_name", "🔍 搜索: " + keyword);
-            vod.put("vod_pic", "");
-            vod.put("vod_remarks", "点击搜索全部源");
-            list.put(vod);
+            if (!TextUtils.isEmpty(vid) && vid.startsWith("msearch:")) {
+                String keyword = vid.replace("msearch:", "");
+                JSONObject vod = new JSONObject();
+                vod.put("vod_id", "search://" + keyword);
+                vod.put("vod_name", "🔍 搜索: " + keyword);
+                vod.put("vod_pic", "");
+                vod.put("vod_remarks", "点击搜索全部源");
+                list.put(vod);
+            }
+
+            result.put("list", list);
+            return result.toString();
+        } catch (Exception e) {
+            return "";
         }
-
-        result.put("list", list);
-        return result.toString();
     }
 
     // ============================================================
     // searchContent
     // ============================================================
     @Override
-    public String searchContent(String key, boolean quick) throws Exception {
+    public String searchContent(String key, boolean quick) {
         return searchContent(key, quick, "1");
     }
 
     @Override
-    public String searchContent(String key, boolean quick, String pg) throws Exception {
-        JSONObject result = new JSONObject();
-        result.put("list", new JSONArray());
-        result.put("page", 1);
-        result.put("pagecount", 1);
-        result.put("limit", 0);
-        result.put("total", 0);
-        return result.toString();
+    public String searchContent(String key, boolean quick, String pg) {
+        try {
+            JSONObject result = new JSONObject();
+            result.put("list", new JSONArray());
+            result.put("page", 1);
+            result.put("pagecount", 1);
+            result.put("limit", 0);
+            result.put("total", 0);
+            return result.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // ============================================================
     // playerContent
     // ============================================================
     @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        JSONObject result = new JSONObject();
-        if (id != null && id.startsWith("search://")) {
-            result.put("parse", 0);
-            result.put("url", id);
-        } else {
-            result.put("parse", 0);
-            result.put("url", "");
+    public String playerContent(String flag, String id, List<String> vipFlags) {
+        try {
+            JSONObject result = new JSONObject();
+            if (id != null && id.startsWith("search://")) {
+                result.put("parse", 0);
+                result.put("url", id);
+            } else {
+                result.put("parse", 0);
+                result.put("url", "");
+            }
+            return result.toString();
+        } catch (Exception e) {
+            return "";
         }
-        return result.toString();
     }
 
     // ============================================================
