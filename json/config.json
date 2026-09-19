@@ -32,6 +32,15 @@
   ],
   "sites": [
     {
+      "key": "chujian",
+      "name": "ChuJian",
+      "type": 3,
+      "api": "csp_ChuJian",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "kuke",
       "name": "KuKe",
       "type": 3,
