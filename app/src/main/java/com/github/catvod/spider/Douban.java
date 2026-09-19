@@ -9,6 +9,7 @@ import com.github.catvod.net.OkHttp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,7 +78,7 @@ public class Douban extends Spider {
     }
 
     // ============================================================
-    // parse_item
+    // parse_item（★ 图片走 proxy）
     // ============================================================
     private JSONObject parseItem(JSONObject item) {
         try {
@@ -94,11 +95,19 @@ public class Douban extends Spider {
             JSONObject pic = item.optJSONObject("pic");
             if (pic != null) picUrl = pic.optString("normal", "");
             if (!TextUtils.isEmpty(picUrl)) {
+                // 补全协议
                 if (picUrl.startsWith("//")) {
                     picUrl = "https:" + picUrl;
                 } else if (!picUrl.startsWith("http://") && !picUrl.startsWith("https://")) {
                     while (picUrl.startsWith("/")) picUrl = picUrl.substring(1);
                     picUrl = "https://" + picUrl;
+                }
+
+                // ★ 豆瓣图片需要 Referer，走 proxy 代理
+                if (picUrl.contains("doubanio.com")) {
+                    try {
+                        picUrl = "proxy://do=csp_Douban&url=" + URLEncoder.encode(picUrl, "UTF-8");
+                    } catch (Exception ignored) {}
                 }
             }
 
@@ -260,7 +269,7 @@ public class Douban extends Spider {
         try {
             JSONObject result = new JSONObject();
 
-            // ★ 懒加载 filters
+            // filters 懒加载
             if (filters == null) {
                 try { filters = buildFilters(); } catch (Exception e) { filters = new JSONObject(); }
             }
@@ -473,6 +482,39 @@ public class Douban extends Spider {
             return result.toString();
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    // ============================================================
+    // ★ proxy（豆瓣图片带 Referer 转发）
+    // ============================================================
+    @Override
+    public Object[] proxy(Map<String, String> params) throws Exception {
+        try {
+            String url = params.get("url");
+            if (TextUtils.isEmpty(url)) return null;
+
+            okhttp3.Request req = new okhttp3.Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Referer", "https://www.douban.com/")
+                .build();
+
+            okhttp3.Response resp = OkHttp.client().newCall(req).execute();
+            if (resp == null || resp.body() == null) return null;
+
+            byte[] data = resp.body().bytes();
+            String contentType = resp.header("Content-Type");
+            if (TextUtils.isEmpty(contentType)) contentType = "image/jpeg";
+
+            return new Object[]{
+                200,
+                contentType,
+                data
+            };
+        } catch (Exception e) {
+            SpiderDebug.log("proxy error: " + e.getMessage());
+            return null;
         }
     }
 
