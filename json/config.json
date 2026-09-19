@@ -32,6 +32,15 @@
   ],
   "sites": [
     {
+      "key": "kuke",
+      "name": "KuKe",
+      "type": 3,
+      "api": "csp_KuKe",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1
+    },
+    {
       "key": "mtyy",
       "name": "Mtyy",
       "type": 3,
