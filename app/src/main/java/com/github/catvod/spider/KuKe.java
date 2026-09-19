@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class Kuke extends Spider {
+public class KuKe extends Spider {
 
     private static final String HOST = "https://www.554dy.com";
 
