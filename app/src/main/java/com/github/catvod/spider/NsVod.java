@@ -3,10 +3,6 @@ package com.github.catvod.spider;
 import android.content.Context;
 import android.text.TextUtils;
 
-import com.github.catvod.bean.Class;
-import com.github.catvod.bean.Filter;
-import com.github.catvod.bean.Result;
-import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
@@ -14,7 +10,6 @@ import com.github.catvod.net.OkHttp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -32,7 +27,7 @@ public class NsVod extends Spider {
     private static final String UA_MB = "Mozilla/5.0 (Linux; Android 13; SM-G9910) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
     // ============================================================
-    // 初始化
+    // init（不发网络请求）
     // ============================================================
     @Override
     public void init(Context context, String extend) {
@@ -42,8 +37,7 @@ public class NsVod extends Spider {
     // ============================================================
     // 工具
     // ============================================================
-
-    static String md5(String s) {
+    private String md5(String s) {
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] bytes = md.digest(s.getBytes("UTF-8"));
@@ -55,7 +49,7 @@ public class NsVod extends Spider {
         }
     }
 
-    static String fixUrl(String u) {
+    private String fixUrl(String u) {
         if (u == null || u.isEmpty()) return "";
         u = u.replace("\\/", "/").trim();
         if (u.startsWith("//")) return "https:" + u;
@@ -64,7 +58,7 @@ public class NsVod extends Spider {
         return HOST + "/" + u;
     }
 
-    static String stripTags(String s) {
+    private String stripTags(String s) {
         if (s == null) return "";
         return s.replaceAll("<[^>]+>", "")
                 .replace("&nbsp;", " ")
@@ -72,187 +66,196 @@ public class NsVod extends Spider {
                 .trim();
     }
 
-    static String decodeHtml(String s) {
+    private String decodeHtml(String s) {
         if (s == null) return "";
         return s.replace("&amp;", "&").replace("&lt;", "<")
                 .replace("&gt;", ">").replace("&quot;", "\"")
                 .replace("&#39;", "'").replace("&nbsp;", " ");
     }
 
-    static String urlEncode(String s) {
-        try {
-            return URLEncoder.encode(s == null ? "" : s, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            return "";
-        }
+    private String urlEncode(String s) {
+        try { return URLEncoder.encode(s == null ? "" : s, "UTF-8"); }
+        catch (Exception e) { return ""; }
     }
 
-    static String group(String regex, String text, int group) {
+    private String group(String regex, String text, int g) {
         if (text == null) return "";
         Matcher m = Pattern.compile(regex, Pattern.DOTALL).matcher(text);
-        return m.find() ? (m.group(group) == null ? "" : m.group(group)) : "";
+        return m.find() ? (m.group(g) == null ? "" : m.group(g)) : "";
     }
 
-    // 通用 GET（默认头）
-    static String get(String url) {
+    private String get(String url) {
         Map<String, String> h = new HashMap<>();
         h.put("User-Agent", UA_MB);
         h.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         h.put("Accept-Language", "zh-CN,zh;q=0.9");
         h.put("Referer", HOST + "/");
-        try {
-            return OkHttp.string(url, h);
-        } catch (Exception e) {
-            SpiderDebug.log("GET error: " + e.getMessage());
-            return "";
-        }
+        try { return OkHttp.string(url, h); }
+        catch (Exception e) { return ""; }
     }
 
-    // 通用 GET（自定义头）
-    static String get(String url, Map<String, String> headers) {
-        try {
-            return OkHttp.string(url, headers);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    // 通用 POST（form 格式，Map 传参，LinkedHashMap 保序）
-    static String post(String url, Map<String, String> params, Map<String, String> headers) {
-        try {
-            return OkHttp.post(url, params, headers).getBody();
-        } catch (Exception e) {
-            SpiderDebug.log("POST error: " + e.getMessage());
-            return "";
-        }
+    private String get(String url, Map<String, String> headers) {
+        try { return OkHttp.string(url, headers); }
+        catch (Exception e) { return ""; }
     }
 
     // ============================================================
-    // 首页（含筛选）
+    // ★ homeContent（手动拼 JSON，和 DuShe 一样）
     // ============================================================
     @Override
     public String homeContent(boolean filter) {
         try {
-            List<Class> classes = new ArrayList<>();
-            classes.add(new Class("1",  "电影"));
-            classes.add(new Class("2",  "连续剧"));
-            classes.add(new Class("3",  "综艺"));
-            classes.add(new Class("4",  "动漫"));
-            classes.add(new Class("41", "短剧"));
-            classes.add(new Class("40", "纪录片"));
-            classes.add(new Class("37", "Netflix"));
+            JSONObject result = new JSONObject();
+            JSONArray classes = new JSONArray();
 
-            // 年份
-            List<Filter.Value> years = new ArrayList<>();
-            years.add(new Filter.Value("全部", ""));
-            for (int y = 2026; y >= 2014; y--) {
-                years.add(new Filter.Value(String.valueOf(y), String.valueOf(y)));
+            String[][] cfg = {
+                {"1",  "电影"}, {"2",  "连续剧"}, {"3",  "综艺"},
+                {"4",  "动漫"}, {"41", "短剧"}, {"40", "纪录片"}, {"37", "Netflix"}
+            };
+            for (String[] c : cfg) {
+                JSONObject o = new JSONObject();
+                o.put("type_id", c[0]);
+                o.put("type_name", c[1]);
+                classes.put(o);
             }
+            result.put("class", classes);
 
-            // 地区
-            List<Filter.Value> areas = buildValues(new String[][]{
-                {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
-                {"美国", "美国"}, {"日本", "日本"}, {"韩国", "韩国"}, {"泰国", "泰国"},
-                {"英国", "英国"}, {"法国", "法国"}, {"其他", "其他"}
-            });
+            // ★ filters 手动拼
+            result.put("filters", buildFiltersJson());
 
-            // 语言
-            List<Filter.Value> langs = buildValues(new String[][]{
-                {"全部", ""}, {"国语", "国语"}, {"英语", "英语"}, {"粤语", "粤语"},
-                {"韩语", "韩语"}, {"日语", "日语"}, {"其它", "其它"}
-            });
-
-            // 排序
-            List<Filter.Value> orders = buildValues(new String[][]{
-                {"最新", "time"}, {"最热", "hits"}, {"评分", "score"}
-            });
-
-            // 各分类类型
-            List<Filter.Value> movieClass = buildValues(new String[][]{
-                {"全部", ""}, {"动作", "动作"}, {"喜剧", "喜剧"}, {"爱情", "爱情"},
-                {"科幻", "科幻"}, {"恐怖", "恐怖"}, {"剧情", "剧情"}, {"战争", "战争"},
-                {"犯罪", "犯罪"}, {"动画", "动画"}, {"奇幻", "奇幻"}, {"武侠", "武侠"},
-                {"悬疑", "悬疑"}, {"惊悚", "惊悚"}, {"古装", "古装"}
-            });
-            List<Filter.Value> tvClass = buildValues(new String[][]{
-                {"全部", ""}, {"古装", "古装"}, {"战争", "战争"}, {"喜剧", "喜剧"},
-                {"家庭", "家庭"}, {"犯罪", "犯罪"}, {"动作", "动作"}, {"奇幻", "奇幻"},
-                {"剧情", "剧情"}, {"历史", "历史"}, {"网剧", "网剧"}
-            });
-            List<Filter.Value> varietyClass = buildValues(new String[][]{
-                {"全部", ""}, {"选秀", "选秀"}, {"情感", "情感"}, {"访谈", "访谈"},
-                {"旅游", "旅游"}, {"音乐", "音乐"}, {"美食", "美食"}, {"生活", "生活"}
-            });
-            List<Filter.Value> animeClass = buildValues(new String[][]{
-                {"全部", ""}, {"情感", "情感"}, {"科幻", "科幻"}, {"热血", "热血"},
-                {"搞笑", "搞笑"}, {"冒险", "冒险"}, {"动作", "动作"}, {"亲子", "亲子"},
-                {"励志", "励志"}
-            });
-
-            LinkedHashMap<String, List<Filter>> filters = new LinkedHashMap<>();
-
-            List<Filter> f1 = new ArrayList<>();
-            f1.add(new Filter("class", "类型", movieClass));
-            f1.add(new Filter("area",  "地区", areas));
-            f1.add(new Filter("year",  "年份", years));
-            f1.add(new Filter("lang",  "语言", langs));
-            f1.add(new Filter("by",    "排序", orders));
-            filters.put("1", f1);
-
-            List<Filter> f2 = new ArrayList<>();
-            f2.add(new Filter("class", "类型", tvClass));
-            f2.add(new Filter("area",  "地区", areas));
-            f2.add(new Filter("year",  "年份", years));
-            f2.add(new Filter("lang",  "语言", langs));
-            f2.add(new Filter("by",    "排序", orders));
-            filters.put("2", f2);
-
-            List<Filter> f3 = new ArrayList<>();
-            f3.add(new Filter("class", "类型", varietyClass));
-            f3.add(new Filter("area",  "地区", areas));
-            f3.add(new Filter("year",  "年份", years));
-            f3.add(new Filter("by",    "排序", orders));
-            filters.put("3", f3);
-
-            List<Filter> f4 = new ArrayList<>();
-            f4.add(new Filter("class", "类型", animeClass));
-            f4.add(new Filter("area",  "地区", areas));
-            f4.add(new Filter("year",  "年份", years));
-            f4.add(new Filter("by",    "排序", orders));
-            filters.put("4", f4);
-
-            return Result.string(classes, filters);
+            return result.toString();
         } catch (Exception e) {
             SpiderDebug.log("homeContent error: " + e.getMessage());
             return "";
         }
     }
 
-    private List<Filter.Value> buildValues(String[][] data) {
-        List<Filter.Value> list = new ArrayList<>();
-        for (String[] kv : data) {
-            list.add(new Filter.Value(kv[0], kv[1]));
+    // ★ filters 用 JSONObject 拼
+    private JSONObject buildFiltersJson() throws Exception {
+        JSONObject filters = new JSONObject();
+
+        // 年份
+        JSONArray years = new JSONArray();
+        JSONObject y0 = new JSONObject(); y0.put("n", "全部"); y0.put("v", ""); years.put(y0);
+        for (int y = 2026; y >= 2014; y--) {
+            JSONObject o = new JSONObject();
+            o.put("n", String.valueOf(y));
+            o.put("v", String.valueOf(y));
+            years.put(o);
         }
-        return list;
+
+        JSONArray areas = vals(new String[][]{
+            {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
+            {"美国", "美国"}, {"日本", "日本"}, {"韩国", "韩国"}, {"泰国", "泰国"},
+            {"英国", "英国"}, {"法国", "法国"}, {"其他", "其他"}
+        });
+        JSONArray langs = vals(new String[][]{
+            {"全部", ""}, {"国语", "国语"}, {"英语", "英语"}, {"粤语", "粤语"},
+            {"韩语", "韩语"}, {"日语", "日语"}, {"其它", "其它"}
+        });
+        JSONArray orders = vals(new String[][]{
+            {"最新", "time"}, {"最热", "hits"}, {"评分", "score"}
+        });
+
+        JSONArray movieClass = vals(new String[][]{
+            {"全部", ""}, {"动作", "动作"}, {"喜剧", "喜剧"}, {"爱情", "爱情"},
+            {"科幻", "科幻"}, {"恐怖", "恐怖"}, {"剧情", "剧情"}, {"战争", "战争"},
+            {"犯罪", "犯罪"}, {"动画", "动画"}, {"奇幻", "奇幻"}, {"武侠", "武侠"},
+            {"悬疑", "悬疑"}, {"惊悚", "惊悚"}, {"古装", "古装"}
+        });
+        JSONArray tvClass = vals(new String[][]{
+            {"全部", ""}, {"古装", "古装"}, {"战争", "战争"}, {"喜剧", "喜剧"},
+            {"家庭", "家庭"}, {"犯罪", "犯罪"}, {"动作", "动作"}, {"奇幻", "奇幻"},
+            {"剧情", "剧情"}, {"历史", "历史"}, {"网剧", "网剧"}
+        });
+        JSONArray varietyClass = vals(new String[][]{
+            {"全部", ""}, {"选秀", "选秀"}, {"情感", "情感"}, {"访谈", "访谈"},
+            {"旅游", "旅游"}, {"音乐", "音乐"}, {"美食", "美食"}, {"生活", "生活"}
+        });
+        JSONArray animeClass = vals(new String[][]{
+            {"全部", ""}, {"情感", "情感"}, {"科幻", "科幻"}, {"热血", "热血"},
+            {"搞笑", "搞笑"}, {"冒险", "冒险"}, {"动作", "动作"}, {"亲子", "亲子"},
+            {"励志", "励志"}
+        });
+
+        // 1 电影
+        JSONArray f1 = new JSONArray();
+        f1.put(fgroup("class", "类型", movieClass));
+        f1.put(fgroup("area", "地区", areas));
+        f1.put(fgroup("year", "年份", years));
+        f1.put(fgroup("lang", "语言", langs));
+        f1.put(fgroup("by", "排序", orders));
+        filters.put("1", f1);
+
+        // 2 连续剧
+        JSONArray f2 = new JSONArray();
+        f2.put(fgroup("class", "类型", tvClass));
+        f2.put(fgroup("area", "地区", areas));
+        f2.put(fgroup("year", "年份", years));
+        f2.put(fgroup("lang", "语言", langs));
+        f2.put(fgroup("by", "排序", orders));
+        filters.put("2", f2);
+
+        // 3 综艺
+        JSONArray f3 = new JSONArray();
+        f3.put(fgroup("class", "类型", varietyClass));
+        f3.put(fgroup("area", "地区", areas));
+        f3.put(fgroup("year", "年份", years));
+        f3.put(fgroup("by", "排序", orders));
+        filters.put("3", f3);
+
+        // 4 动漫
+        JSONArray f4 = new JSONArray();
+        f4.put(fgroup("class", "类型", animeClass));
+        f4.put(fgroup("area", "地区", areas));
+        f4.put(fgroup("year", "年份", years));
+        f4.put(fgroup("by", "排序", orders));
+        filters.put("4", f4);
+
+        return filters;
+    }
+
+    private JSONArray vals(String[][] data) throws Exception {
+        JSONArray arr = new JSONArray();
+        for (String[] kv : data) {
+            JSONObject o = new JSONObject();
+            o.put("n", kv[0]);
+            o.put("v", kv[1]);
+            arr.put(o);
+        }
+        return arr;
+    }
+
+    private JSONObject fgroup(String key, String name, JSONArray values) throws Exception {
+        JSONObject obj = new JSONObject();
+        obj.put("key", key);
+        obj.put("name", name);
+        obj.put("value", values);
+        return obj;
     }
 
     // ============================================================
-    // 首页推荐
+    // homeVideoContent
     // ============================================================
     @Override
     public String homeVideoContent() {
         try {
             String html = get(HOST + "/");
-            List<Vod> list = parseHtmlList(html);
+            List<JSONObject> list = parseHtmlList(html);
             if (list.size() > 30) list = list.subList(0, 30);
-            return Result.string(list);
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
+            return result.toString();
         } catch (Exception e) {
             return "";
         }
     }
 
     // ============================================================
-    // 分类（POST + 签名）
+    // categoryContent（手动拼 JSON）
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
@@ -274,7 +277,6 @@ public class NsVod extends Spider {
             long t = System.currentTimeMillis() / 1000;
             String key = md5("DS" + t + SALT);
 
-            // ★ LinkedHashMap 保序，签名依赖顺序
             LinkedHashMap<String, String> params = new LinkedHashMap<>();
             params.put("type", tid);
             params.put("class", cls);
@@ -297,29 +299,40 @@ public class NsVod extends Spider {
             headers.put("Origin", HOST);
             headers.put("Referer", HOST + "/vodshow/" + tid + "-----------.html");
 
-            String resp = post(HOST + "/index.php/api/vod", params, headers);
-            SpiderDebug.log("category resp: " + (resp == null ? "null" : resp.substring(0, Math.min(200, resp.length()))));
+            String resp = "";
+            try {
+                resp = OkHttp.post(HOST + "/index.php/api/vod", params, headers).getBody();
+            } catch (Exception e) {
+                SpiderDebug.log("POST error: " + e.getMessage());
+            }
+            if (resp == null) resp = "";
+            SpiderDebug.log("category resp: " + resp.substring(0, Math.min(200, resp.length())));
 
-            JSONObject data = new JSONObject(resp == null || resp.isEmpty() ? "{}" : resp);
+            JSONObject data = new JSONObject(resp.isEmpty() ? "{}" : resp);
             JSONArray arr = data.optJSONArray("list");
-            List<Vod> list = new ArrayList<>();
+            JSONArray listArr = new JSONArray();
             if (arr != null) {
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject it = arr.getJSONObject(i);
-                    list.add(new Vod(
-                        String.valueOf(it.opt("vod_id")),
-                        it.optString("vod_name"),
-                        fixUrl(it.optString("vod_pic")),
-                        it.optString("vod_remarks")
-                    ));
+                    JSONObject o = new JSONObject();
+                    o.put("vod_id", String.valueOf(it.opt("vod_id")));
+                    o.put("vod_name", it.optString("vod_name"));
+                    o.put("vod_pic", fixUrl(it.optString("vod_pic")));
+                    o.put("vod_remarks", it.optString("vod_remarks"));
+                    listArr.put(o);
                 }
             }
             int pagecount = data.optInt("pagecount", 1);
             int limit = data.optInt("limit", 40);
             int total = data.optInt("total", pagecount * limit);
 
-            return Result.get().vod(list)
-                    .page(page, pagecount, limit, total).string();
+            JSONObject result = new JSONObject();
+            result.put("page", page);
+            result.put("pagecount", pagecount);
+            result.put("limit", limit);
+            result.put("total", total);
+            result.put("list", listArr);
+            return result.toString();
         } catch (Exception e) {
             SpiderDebug.log("categoryContent error: " + e.getMessage());
             return "";
@@ -327,10 +340,10 @@ public class NsVod extends Spider {
     }
 
     // ============================================================
-    // HTML 列表解析
+    // parseHtmlList → 返回 List<JSONObject>
     // ============================================================
-    private List<Vod> parseHtmlList(String html) {
-        List<Vod> list = new ArrayList<>();
+    private List<JSONObject> parseHtmlList(String html) {
+        List<JSONObject> list = new ArrayList<>();
         if (html == null || html.isEmpty()) return list;
         try {
             Matcher blockM = Pattern.compile(
@@ -360,7 +373,12 @@ public class NsVod extends Spider {
                 remark = stripTags(remark);
                 if (remark.length() > 30) remark = remark.substring(0, 30);
 
-                list.add(new Vod(id, name, pic, remark));
+                JSONObject o = new JSONObject();
+                o.put("vod_id", id);
+                o.put("vod_name", name);
+                o.put("vod_pic", pic);
+                o.put("vod_remarks", remark);
+                list.add(o);
             }
         } catch (Exception e) {
             SpiderDebug.log("parseHtmlList error: " + e.getMessage());
@@ -369,29 +387,37 @@ public class NsVod extends Spider {
     }
 
     // ============================================================
-    // 详情
+    // detailContent（手动拼 JSON）
     // ============================================================
     @Override
     public String detailContent(List<String> ids) {
         try {
             String id = ids.get(0);
             String html = get(HOST + "/voddetail/" + id + ".html");
-            if (TextUtils.isEmpty(html)) return "";
+            if (TextUtils.isEmpty(html)) {
+                JSONObject r = new JSONObject();
+                r.put("list", new JSONArray());
+                return r.toString();
+            }
 
-            Vod vod = new Vod();
-            vod.setVodId(id);
-            vod.setVodName(decodeHtml(group(
+            JSONObject vod = new JSONObject();
+            vod.put("vod_id", id);
+            vod.put("vod_name", decodeHtml(group(
                 "<h3 class=\"slide-info-title[^\"]*\"[^>]*>([^<]+)</h3>", html, 1).trim()));
-            vod.setVodPic(fixUrl(group(
+            vod.put("vod_pic", fixUrl(group(
                 "class=\"lazy lazy1 mask-1[^\"]*\"[^>]*(?:data-src|src)=\"([^\"]+)\"", html, 1)));
-            vod.setVodContent(stripTags(group(
+            vod.put("vod_content", stripTags(group(
                 "<div id=\"height_limit\"[^>]*class=\"text[^\"]*\"[^>]*>([\\s\\S]*?)</div>", html, 1)));
 
             String[] pl = parsePlaylist(html);
-            vod.setVodPlayFrom(pl[0]);
-            vod.setVodPlayUrl(pl[1]);
+            vod.put("vod_play_from", pl[0]);
+            vod.put("vod_play_url", pl[1]);
 
-            return Result.string(vod);
+            JSONArray list = new JSONArray();
+            list.put(vod);
+            JSONObject result = new JSONObject();
+            result.put("list", list);
+            return result.toString();
         } catch (Exception e) {
             SpiderDebug.log("detailContent error: " + e.getMessage());
             return "";
@@ -403,7 +429,6 @@ public class NsVod extends Spider {
         StringBuilder fromSb = new StringBuilder();
         StringBuilder urlSb = new StringBuilder();
 
-        // 线路名
         List<String> names = new ArrayList<>();
         Matcher tabM = Pattern.compile(
             "<a[^>]*class=\"[^\"]*swiper-slide[^\"]*\"[^>]*>([\\s\\S]*?)</a>"
@@ -420,7 +445,6 @@ public class NsVod extends Spider {
         }
         if (names.isEmpty()) names.add("线路1");
 
-        // 剧集
         Matcher boxM = Pattern.compile(
             "<div class=\"anthology-list-box[^\"]*\"[^>]*>([\\s\\S]*?)</ul>\\s*</div>\\s*</div>"
         ).matcher(html);
@@ -454,14 +478,20 @@ public class NsVod extends Spider {
     }
 
     // ============================================================
-    // 搜索
+    // searchContent
     // ============================================================
     @Override
     public String searchContent(String key, boolean quick) {
         try {
             String url = HOST + "/vodsearch/-------------.html?wd=" + urlEncode(key);
             String html = get(url);
-            return Result.string(parseHtmlList(html));
+            List<JSONObject> list = parseHtmlList(html);
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
+            return result.toString();
         } catch (Exception e) {
             SpiderDebug.log("searchContent error: " + e.getMessage());
             return "";
@@ -476,21 +506,30 @@ public class NsVod extends Spider {
             String url = HOST + "/vodsearch/-------------.html?wd=" + urlEncode(key);
             if (page > 1) url += "&page=" + page;
             String html = get(url);
-            return Result.string(parseHtmlList(html));
+            List<JSONObject> list = parseHtmlList(html);
+
+            JSONArray arr = new JSONArray();
+            for (JSONObject o : list) arr.put(o);
+            JSONObject result = new JSONObject();
+            result.put("list", arr);
+            return result.toString();
         } catch (Exception e) {
             return "";
         }
     }
 
     // ============================================================
-    // 播放（直链 → jxapi → artplayer 嗅探）
+    // playerContent（手动拼 JSON）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
             // ① 入参直链
             if (id != null && id.matches(".*\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?.*)?$")) {
-                return Result.get().url(id).string();
+                JSONObject r = new JSONObject();
+                r.put("parse", 0);
+                r.put("url", id);
+                return r.toString();
             }
 
             // ② 抓播放页
@@ -521,16 +560,19 @@ public class NsVod extends Spider {
 
             // ④ m3u8/mp4 → 直连
             if (!realUrl.isEmpty() && realUrl.matches(".*\\.(m3u8|mp4|flv)(\\?.*)?$")) {
-                return Result.get().url(realUrl).string();
+                JSONObject r = new JSONObject();
+                r.put("parse", 0);
+                r.put("url", realUrl);
+                return r.toString();
             }
 
-            // ⑤ 第三方源 → 读 playerconfig.js，抠 jxapi / artplayer
+            // ⑤ 第三方源 → 读 playerconfig.js
             if (!realUrl.isEmpty()) {
                 String[] cfg = readPlayerConfig(html);
                 String jxapi = cfg[0];
                 String artplayer = cfg[1];
 
-                // 5.1 先试 jxapi
+                // 5.1 jxapi
                 if (!jxapi.isEmpty()) {
                     String apiUrl = jxapi + urlEncode(realUrl);
                     SpiderDebug.log("→ jxapi: " + apiUrl);
@@ -547,7 +589,10 @@ public class NsVod extends Spider {
                             if (j.optInt("code") == 200 && j.has("url")) {
                                 String videoUrl = j.optString("url").replace("\\/", "/");
                                 SpiderDebug.log("✅ jxapi: " + videoUrl);
-                                return Result.get().url(videoUrl).string();
+                                JSONObject r = new JSONObject();
+                                r.put("parse", 0);
+                                r.put("url", videoUrl);
+                                return r.toString();
                             }
                         } catch (Exception e) {
                             SpiderDebug.log("jxapi JSON error: " + e.getMessage());
@@ -555,11 +600,14 @@ public class NsVod extends Spider {
                     }
                 }
 
-                // 5.2 jxapi 不行 → artplayer 嗅探
+                // 5.2 artplayer 嗅探
                 if (!artplayer.isEmpty()) {
                     String sniffUrl = artplayer + urlEncode(realUrl);
                     SpiderDebug.log("⚠️ artplayer 嗅探: " + sniffUrl);
-                    return Result.get().parse().url(sniffUrl).string();
+                    JSONObject r = new JSONObject();
+                    r.put("parse", 1);
+                    r.put("url", sniffUrl);
+                    return r.toString();
                 }
             }
 
@@ -572,7 +620,6 @@ public class NsVod extends Spider {
         }
     }
 
-    // 返回 [jxapi, artplayer]
     private String[] readPlayerConfig(String html) {
         String jxapi = "";
         String artplayer = "";
@@ -586,7 +633,6 @@ public class NsVod extends Spider {
             String cfgJs = get(cfgUrl);
             if (TextUtils.isEmpty(cfgJs)) return new String[]{"", ""};
 
-            // jxapi
             String jx = group("\"parse\"\\s*:\\s*\"([^\"]*jxapi[^\"]*)\"", cfgJs, 1);
             if (!jx.isEmpty()) {
                 jx = jx.replace("\\/", "/");
@@ -599,7 +645,6 @@ public class NsVod extends Spider {
                 SpiderDebug.log("  jxapi: " + jxapi);
             }
 
-            // artplayer
             String art = group("\"parse\"\\s*:\\s*\"([^\"]*artplayer\\.html[^\"]*)\"", cfgJs, 1);
             if (!art.isEmpty()) {
                 art = art.replace("\\/", "/");
@@ -616,9 +661,6 @@ public class NsVod extends Spider {
         return new String[]{jxapi, artplayer};
     }
 
-    // ============================================================
-    // 销毁
-    // ============================================================
     @Override
     public void destroy() {
         SpiderDebug.log("NsVod destroy");
