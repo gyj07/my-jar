@@ -28,7 +28,7 @@ public class SaoHuo extends Spider {
     private Map<String, String> headers;
 
     // ============================================================
-    // init
+    // init（★ 不发网络请求）
     // ============================================================
     @Override
     public void init(Context context, String extend) {
@@ -39,9 +39,12 @@ public class SaoHuo extends Spider {
         headers = new HashMap<>();
         headers.put("User-Agent", UA);
         headers.put("accept-language", "zh-CN,zh;q=0.9");
+        // ★ 删掉了 request(host)
+    }
 
-        // 初始化请求（拿 cookie）
-        request(host);
+    private Map<String, String> getHeaders() {
+        if (headers == null) init(null, null);
+        return headers;
     }
 
     // ============================================================
@@ -53,7 +56,7 @@ public class SaoHuo extends Spider {
 
     private String request(String url, Map<String, String> extraHeaders, String referer) {
         try {
-            Map<String, String> h = new HashMap<>(headers);
+            Map<String, String> h = new HashMap<>(getHeaders());
             if (extraHeaders != null) h.putAll(extraHeaders);
             if (referer != null) h.put("Referer", referer);
             if (!cookie.isEmpty()) h.put("Cookie", cookie);
@@ -68,7 +71,7 @@ public class SaoHuo extends Spider {
 
     private String postJson(String url, JSONObject obj, String referer) {
         try {
-            Map<String, String> h = new HashMap<>(headers);
+            Map<String, String> h = new HashMap<>(getHeaders());
             h.put("Content-Type", "application/json");
             if (referer != null) h.put("Referer", referer);
 
@@ -81,7 +84,7 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // home
+    // homeContent
     // ============================================================
     @Override
     public String homeContent(boolean filter) {
@@ -148,12 +151,11 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // homeVod
+    // homeVideoContent
     // ============================================================
     @Override
     public String homeVideoContent() {
         try {
-            if (TextUtils.isEmpty(host)) init(null, null);
             String html = request(host);
             if (html.isEmpty()) {
                 JSONObject r = new JSONObject();
@@ -173,13 +175,12 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // category
+    // categoryContent
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
                                   HashMap<String, String> extend) {
         try {
-            if (TextUtils.isEmpty(host)) init(null, null);
             int page = 1;
             try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
 
@@ -219,12 +220,11 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // ★ detail（按 QPython 测试结果修正）
+    // detailContent
     // ============================================================
     @Override
     public String detailContent(List<String> ids) {
         try {
-            if (TextUtils.isEmpty(host)) init(null, null);
             String id = ids.get(0);
             String url = id.startsWith("http") ? id : (host + id);
             String html = request(url);
@@ -237,14 +237,14 @@ public class SaoHuo extends Spider {
             JSONObject info = new JSONObject();
             info.put("vod_id", id);
 
-            // ★ 片名：<h1 class="v_title"><a>片名</a></h1>
+            // 片名
             String name = group("<h1[^>]*class=\"v_title\"[^>]*>[\\s\\S]*?<a[^>]*>([^<]+)</a>", html, 1);
             if (name.isEmpty()) {
                 name = group("<h1[^>]*class=\"title\"[^>]*>([^<]+)</h1>", html, 1);
             }
             info.put("vod_name", name.trim());
 
-            // ★ 封面：优先 .m_background 的 style
+            // 封面
             String pic = group("class=\"m_background\"[^>]*style=\"background-image:url\\(([^)]+)\\)", html, 1);
             pic = pic.replace("\"", "").replace("'", "").trim();
             if (pic.isEmpty()) {
@@ -256,7 +256,7 @@ public class SaoHuo extends Spider {
             if (!pic.isEmpty() && !pic.startsWith("http")) pic = host + pic;
             info.put("vod_pic", pic);
 
-            // ★ 参数行：<h1 class="v_title">...</h1><p>大陆 / 2026 / 剧情,爱情 / 导演:xxx / 主演:xxx...</p>
+            // 参数行
             String infoLine = group(
                 "<h1[^>]*class=\"v_title\"[^>]*>[\\s\\S]*?</h1>\\s*<p>([\\s\\S]*?)<a",
                 html, 1
@@ -289,7 +289,7 @@ public class SaoHuo extends Spider {
             info.put("vod_year", vodYear);
             info.put("vod_class", typeName);
 
-            // ★ 简介：<p class="p_txt show_part">剧情简介：xxx</p>
+            // 简介
             String content = group("<p[^>]*class=\"p_txt[^\"]*\"[^>]*>([\\s\\S]*?)</p>", html, 1);
             if (content.isEmpty()) {
                 content = group("<[^>]*class=\"intro\"[^>]*>([\\s\\S]*?)</", html, 1);
@@ -301,16 +301,12 @@ public class SaoHuo extends Spider {
             content = content.replaceAll("^(剧情)?简介[:：]\\s*", "").trim();
             info.put("vod_content", content);
 
-            // 播放列表（不动）
+            // 播放列表
             String[] pl = extractPlaylist(html);
             info.put("vod_play_from", pl[0]);
             info.put("vod_play_url", pl[1]);
 
-            SpiderDebug.log("detail: name=" + name);
-            SpiderDebug.log("detail: area=" + vodArea + " year=" + vodYear + " type=" + typeName);
-            SpiderDebug.log("detail: director=" + vodDirector + " actor=" + vodActor);
-            SpiderDebug.log("detail: content=" + content);
-            SpiderDebug.log("detail: from=" + pl[0]);
+            SpiderDebug.log("detail: name=" + name + " from=" + pl[0]);
 
             JSONArray list = new JSONArray();
             list.put(info);
@@ -324,13 +320,13 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // 播放列表（原样保留）
+    // 播放列表
     // ============================================================
     private String[] extractPlaylist(String html) {
         List<String> sourceNames = new ArrayList<>();
         List<String> sourceUrls = new ArrayList<>();
 
-        // 找 from_list 里的线路名
+        // 线路名
         Matcher fromM = Pattern.compile(
             "<[^>]*class=\"[^\"]*from_list[^\"]*\"[^>]*>([\\s\\S]*?)</ul>", Pattern.DOTALL
         ).matcher(html);
@@ -345,7 +341,7 @@ public class SaoHuo extends Spider {
             }
         }
 
-        // 找 #play_link 里的剧集块
+        // #play_link 剧集
         Matcher linkM = Pattern.compile(
             "<ul[^>]*id=\"play_link\"[^>]*>([\\s\\S]*?)</ul>", Pattern.DOTALL
         ).matcher(html);
@@ -417,12 +413,11 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // search
+    // searchContent
     // ============================================================
     @Override
     public String searchContent(String wd, boolean quick) {
         try {
-            if (TextUtils.isEmpty(host)) init(null, null);
             String url = host + "/s----------.html?wd=" + urlEncode(wd);
             String html = request(url);
             if (html.isEmpty()) {
@@ -443,12 +438,12 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // play（三层：播放页 → hhplayer → POST /api/parse）原样保留
+    // playerContent
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
-            String playPageUrl = id.startsWith("http") ? id : ((TextUtils.isEmpty(host) ? "https://shdy2.com" : host) + id);
+            String playPageUrl = id.startsWith("http") ? id : (host + id);
 
             // 1. 播放页
             String html = request(playPageUrl);
@@ -464,7 +459,7 @@ public class SaoHuo extends Spider {
                 return buildResult(0, playPageUrl, null, 0);
             }
 
-            // 2. hhplayer 页面
+            // 2. hhplayer
             Map<String, String> hhHeaders = new HashMap<>();
             hhHeaders.put("Referer", playPageUrl);
             String hhHtml = request(hhUrl, hhHeaders, null);
@@ -544,7 +539,7 @@ public class SaoHuo extends Spider {
     }
 
     // ============================================================
-    // extractHhUrl
+    // 辅助：extractHhUrl / extractBootstrap / extractM3u8
     // ============================================================
     private String extractHhUrl(String html) {
         if (html == null || html.isEmpty()) return "";
@@ -559,9 +554,6 @@ public class SaoHuo extends Spider {
         return "";
     }
 
-    // ============================================================
-    // extractBootstrap
-    // ============================================================
     private JSONObject extractBootstrap(String html) {
         if (html == null || html.isEmpty()) return null;
         Matcher m = Pattern.compile("__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^}]+\\})").matcher(html);
@@ -573,9 +565,6 @@ public class SaoHuo extends Spider {
         }
     }
 
-    // ============================================================
-    // extractM3u8
-    // ============================================================
     private String extractM3u8(String text) {
         if (text == null || text.isEmpty()) return "";
         String[] patterns = {
