@@ -28,10 +28,10 @@ public class Nm extends Spider {
     private Map<String, String> headers;
 
     // ============================================================
-    // init
+    // init（★ 只去掉 throws Exception）
     // ============================================================
     @Override
-    public void init(android.content.Context context, String extend) throws Exception {
+    public void init(android.content.Context context, String extend) {
         if (!TextUtils.isEmpty(extend)) {
             extend = extend.trim();
             if (extend.startsWith("http")) {
@@ -107,7 +107,7 @@ public class Nm extends Spider {
     }
 
     // ============================================================
-    // 列表解析（原版 cheerio：.globalPicList li, .resize_list li）
+    // 列表解析
     // ============================================================
     private List<JSONObject> parseList(String html) {
         List<JSONObject> list = new ArrayList<>();
@@ -175,7 +175,6 @@ public class Nm extends Spider {
         JSONArray areaArr = buildAreas();
         JSONArray byArr = buildBy();
 
-        // 1 电影
         JSONArray f1 = new JSONArray();
         f1.put(filterGroup("id", "类型", new String[][]{
             {"全部", ""}, {"动作片", "5"}, {"喜剧片", "6"}, {"爱情片", "7"},
@@ -187,7 +186,6 @@ public class Nm extends Spider {
         f1.put(filterGroup("by", "排序", byArr));
         filters.put("1", f1);
 
-        // 2 连续剧
         JSONArray f2 = new JSONArray();
         f2.put(filterGroup("id", "类型", new String[][]{
             {"全部", ""}, {"国产剧", "12"}, {"港台泰", "13"},
@@ -198,7 +196,6 @@ public class Nm extends Spider {
         f2.put(filterGroup("by", "排序", byArr));
         filters.put("2", f2);
 
-        // 3 综艺
         JSONArray f3 = new JSONArray();
         f3.put(filterGroup("id", "类型", new String[][]{{"全部", ""}}));
         f3.put(filterGroup("area", "地区", areaArr));
@@ -206,7 +203,6 @@ public class Nm extends Spider {
         f3.put(filterGroup("by", "排序", byArr));
         filters.put("3", f3);
 
-        // 4 动漫
         JSONArray f4 = new JSONArray();
         f4.put(filterGroup("id", "类型", new String[][]{
             {"全部", ""}, {"动漫剧", "18"}
@@ -216,7 +212,6 @@ public class Nm extends Spider {
         f4.put(filterGroup("by", "排序", byArr));
         filters.put("4", f4);
 
-        // 26 短剧
         JSONArray f26 = new JSONArray();
         f26.put(filterGroup("id", "类型", new String[][]{{"全部", ""}}));
         f26.put(filterGroup("area", "地区", areaArr));
@@ -426,7 +421,7 @@ public class Nm extends Spider {
     }
 
     // ============================================================
-    // detailContent（★ 全部按 QPython 测试结果修正）
+    // detailContent
     // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
@@ -437,29 +432,24 @@ public class Nm extends Spider {
         JSONObject info = new JSONObject();
         info.put("vod_id", vid);
 
-        // ★ 片名：h1.title > a[title]
         String name = group("<h1[^>]*class=\"title\"[^>]*>[\\s\\S]*?<a[^>]*title=\"([^\"]+)\"", html, 1);
         if (name.isEmpty()) {
             name = group("<title>\\s*《([^》]+)》", html, 1);
         }
         info.put("vod_name", name.trim());
 
-        // 封面
         String pic = group("<[^>]*class=\"page-hd\"[^>]*>[\\s\\S]*?<img[^>]*src=\"([^\"]+)\"", html, 1);
         info.put("vod_pic", fixPic(pic));
 
-        // ★ 状态
         String remarks = group("<div[^>]*class=\"desc_item\"[^>]*>[\\s\\S]*?状态[:：][\\s\\S]*?<font[^>]*>([^<]+)</font>", html, 1);
         info.put("vod_remarks", remarks.trim());
 
-        // ★ 年代
         String year = group("<article[^>]*class=\"detail-con\"[^>]*>[\\s\\S]*?年代[：:][\\s\\S]*?<em[^>]*>([^<]+)</em>", html, 1);
         if (year.isEmpty()) {
             year = group("<div[^>]*class=\"desc_item\"[^>]*>[\\s\\S]*?年代[:：][\\s\\S]*?<a[^>]*>([^<]+)</a>", html, 1);
         }
         info.put("vod_year", year.trim());
 
-        // ★ 主演
         String actorBlock = group("<div[^>]*class=\"desc_item\"[^>]*>[\\s\\S]*?主演[:：]([\\s\\S]*?)</div>", html, 1);
         List<String> actorList = new ArrayList<>();
         if (!actorBlock.isEmpty()) {
@@ -471,7 +461,6 @@ public class Nm extends Spider {
         }
         info.put("vod_actor", String.join(" ", actorList));
 
-        // ★ 导演
         String dirBlock = group("<div[^>]*class=\"desc_item\"[^>]*>[\\s\\S]*?导演[:：]([\\s\\S]*?)</div>", html, 1);
         List<String> dirList = new ArrayList<>();
         if (!dirBlock.isEmpty()) {
@@ -483,7 +472,6 @@ public class Nm extends Spider {
         }
         info.put("vod_director", String.join(" ", dirList));
 
-        // ★ 简介
         String content = group("<article[^>]*class=\"detail-con\"[^>]*>[\\s\\S]*?<p>([\\s\\S]*?)</p>", html, 1);
         content = content.replaceAll("<[^>]+>", "")
                          .replaceAll("简[\\s\\S]*?介[：:]\\s*", "")
@@ -492,7 +480,6 @@ public class Nm extends Spider {
                          .trim();
         info.put("vod_content", content);
 
-        // ★ 播放按钮（href 在前）
         String playBtn = group("<a[^>]*href=\"([^\"]+)\"[^>]*class=\"greenBtn\"", html, 1);
         if (playBtn.isEmpty()) {
             playBtn = group("<a[^>]*class=\"greenBtn\"[^>]*href=\"([^\"]+)\"", html, 1);
@@ -513,18 +500,12 @@ public class Nm extends Spider {
             String macFrom = group("mac_from='([^']+)'", playHtml, 1);
             String macUrl  = group("mac_url='([^']+)'", playHtml, 1);
 
-            SpiderDebug.log("detail: mac_from = " + macFrom);
-            SpiderDebug.log("detail: mac_url len = " + macUrl.length());
-
             if (!macFrom.isEmpty() && !macUrl.isEmpty()) {
-                // ★ 从 #leftTabBox 抠线路名
                 List<String> lineNames = new ArrayList<>();
                 String tabBox = group(
                     "<div[^>]*id=\"leftTabBox\"[^>]*>[\\s\\S]*?<ul>([\\s\\S]*?)</ul>",
                     playHtml, 1
                 );
-                SpiderDebug.log("detail: tabBox len = " + tabBox.length());
-
                 if (!tabBox.isEmpty()) {
                     Matcher liM = Pattern.compile("<li[^>]*>[\\s\\S]*?</li>").matcher(tabBox);
                     while (liM.find()) {
@@ -533,11 +514,9 @@ public class Nm extends Spider {
                         if (!nm.isEmpty()) lineNames.add(nm.trim());
                     }
                 }
-                // 兜底：mac_from split
                 if (lineNames.isEmpty()) {
                     for (String x : macFrom.split("\\$\\$\\$")) lineNames.add(x);
                 }
-                SpiderDebug.log("detail: lineNames = " + lineNames);
 
                 String[] urlLines = macUrl.split("\\$\\$\\$");
                 List<String> playFrom = new ArrayList<>();
@@ -604,9 +583,6 @@ public class Nm extends Spider {
         return result.toString();
     }
 
-    // ============================================================
-    // decodeNmUrl — 农民自定义 Base64 解码
-    // ============================================================
     private String decodeNmUrl(String s) {
         try {
             if (s == null) return "";
