@@ -13,6 +13,7 @@ import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class Douban extends Spider {
 
@@ -22,6 +23,9 @@ public class Douban extends Spider {
 
     private Map<String, String> headers;
     private JSONObject filters;
+
+    // ★ 自己 new 的 client
+    private static okhttp3.OkHttpClient proxyClient;
 
     private String[][] classesConfig = {
         {"🔥热门电影", "hot_gaia"},
@@ -34,7 +38,7 @@ public class Douban extends Spider {
     };
 
     // ============================================================
-    // ★ 没有 init，headers 惰性构造
+    // headers 惰性构造
     // ============================================================
     private Map<String, String> getHeaders() {
         if (headers == null) {
@@ -78,7 +82,7 @@ public class Douban extends Spider {
     }
 
     // ============================================================
-    // parse_item（★ 图片走 proxy）
+    // parseItem（图片走 proxy）
     // ============================================================
     private JSONObject parseItem(JSONObject item) {
         try {
@@ -95,7 +99,6 @@ public class Douban extends Spider {
             JSONObject pic = item.optJSONObject("pic");
             if (pic != null) picUrl = pic.optString("normal", "");
             if (!TextUtils.isEmpty(picUrl)) {
-                // 补全协议
                 if (picUrl.startsWith("//")) {
                     picUrl = "https:" + picUrl;
                 } else if (!picUrl.startsWith("http://") && !picUrl.startsWith("https://")) {
@@ -103,7 +106,7 @@ public class Douban extends Spider {
                     picUrl = "https://" + picUrl;
                 }
 
-                // ★ 豆瓣图片需要 Referer，走 proxy 代理
+                // ★ 豆瓣图片需要 Referer，走 proxy
                 if (picUrl.contains("doubanio.com")) {
                     try {
                         picUrl = "proxy://do=csp_Douban&url=" + URLEncoder.encode(picUrl, "UTF-8");
@@ -262,14 +265,13 @@ public class Douban extends Spider {
     }
 
     // ============================================================
-    // homeContent（★ filters 懒加载）
+    // homeContent（filters 懒加载）
     // ============================================================
     @Override
     public String homeContent(boolean filter) {
         try {
             JSONObject result = new JSONObject();
 
-            // filters 懒加载
             if (filters == null) {
                 try { filters = buildFilters(); } catch (Exception e) { filters = new JSONObject(); }
             }
@@ -486,8 +488,19 @@ public class Douban extends Spider {
     }
 
     // ============================================================
-    // ★ proxy（豆瓣图片带 Referer 转发）
+    // ★ proxy（方案 1：完全自己 new client，不用 Spider.client()）
     // ============================================================
+    private static okhttp3.OkHttpClient getProxyClient() {
+        if (proxyClient == null) {
+            proxyClient = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .build();
+        }
+        return proxyClient;
+    }
+
     @Override
     public Object[] proxy(Map<String, String> params) throws Exception {
         try {
@@ -500,7 +513,7 @@ public class Douban extends Spider {
                 .header("Referer", "https://www.douban.com/")
                 .build();
 
-            okhttp3.Response resp = OkHttp.client().newCall(req).execute();
+            okhttp3.Response resp = getProxyClient().newCall(req).execute();
             if (resp == null || resp.body() == null) return null;
 
             byte[] data = resp.body().bytes();
