@@ -1,34 +1,8 @@
 {
   "spider": "../jar/custom_spider.jar",
   "lives": [
-    {
-      "name": "XtreamCode",
-      "api": "csp_XtreamCode",
-      "url": "http://iptv.icsnleb.com:25461/player_api.php?username=12&password=12",
-      "epg": "http://iptv.icsnleb.com:25461/xmltv.php?username=12&password=12",
-      "ext": {
-        "live": true,
-        "vod": true,
-        "formats": [
-          "m3u8",
-          "ts"
-        ]
-      }
-    },
-    {
-      "name": "MQiTV",
-      "api": "csp_MQiTV",
-      "ext": [
-        {
-          "name": "Hotel A",
-          "url": "https://127.0.0.1:4433"
-        },
-        {
-          "name": "Hotel B",
-          "url": "http://127.0.0.1"
-        }
-      ]
-    }
+    
+    
   ],
   "sites": [
     {
@@ -103,24 +77,8 @@
       "quickSearch": 1,
       "filterable": 1
     },
-    {
-      "key": "alist",
-      "name": "AList",
-      "type": 3,
-      "api": "csp_AList",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1
-    },
-    {
-      "key": "bili",
-      "name": "Bili",
-      "type": 3,
-      "api": "csp_Bili",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1
-    },
+   
+   
     {
       "key": "jable",
       "name": "Jable",
@@ -139,24 +97,8 @@
       "quickSearch": 1,
       "filterable": 1
     },
-    {
-      "key": "ptt",
-      "name": "PTT",
-      "type": 3,
-      "api": "csp_PTT",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1
-    },
-    {
-      "key": "samba",
-      "name": "Samba",
-      "type": 3,
-      "api": "csp_Samba",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1
-    },
+    
+    
     {
       "key": "shenma",
       "name": "ShenMa",
@@ -166,15 +108,7 @@
       "quickSearch": 1,
       "filterable": 1
     },
-    {
-      "key": "webdav",
-      "name": "WebDAV",
-      "type": 3,
-      "api": "csp_WebDAV",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1
-    },
+    
     {
       "key": "local",
       "name": "Local",
@@ -183,15 +117,7 @@
       "searchable": 0,
       "changeable": 0
     },
-    {
-      "key": "market",
-      "name": "Market",
-      "type": 3,
-      "api": "csp_Market",
-      "searchable": 0,
-      "changeable": 0,
-      "ext": "./market.json"
-    },
+    
     {
       "key": "push_agent",
       "name": "Push",
